@@ -81,7 +81,7 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-// Algoritmo de Preenchimento (Flood Fill) com proteção estrita contra índices fora da matriz
+// CORREÇÃO: Sintaxe corrigida na hora de adicionar à fila (queue.push)
 function floodFillFloor(startRow, startCol, paintMode) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     const queue = [{r: startRow, c: startCol}];
@@ -95,22 +95,22 @@ function floodFillFloor(startRow, startCol, paintMode) {
         // Esquerda (c-1)
         if (c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
             visited.add(`${r},${c-1}`);
-            queue.push({r, c: c-1});
+            queue.push({r: r, c: c-1});
         }
         // Direita (c+1)
         if (c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
             visited.add(`${r},${c+1}`);
-            queue.push({r, c: c+1});
+            queue.push({r: r, c: c+1});
         }
         // Cima (r-1)
         if (r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
             visited.add(`${r-1},${c}`);
-            queue.push({r-1, c});
+            queue.push({r: r-1, c: c});
         }
         // Baixo (r+1)
         if (r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
             visited.add(`${r+1},${c}`);
-            queue.push({r+1, c});
+            queue.push({r: r+1, c: c});
         }
     }
 }
