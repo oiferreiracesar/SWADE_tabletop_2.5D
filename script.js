@@ -81,8 +81,9 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-// NOVO: Algoritmo de Preenchimento (Flood Fill) colidindo nas arestas exatas
+// Algoritmo de Preenchimento (Flood Fill) com proteção estrita contra índices fora da matriz
 function floodFillFloor(startRow, startCol, paintMode) {
+    if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     const queue = [{r: startRow, c: startCol}];
     const visited = new Set();
     visited.add(`${startRow},${startCol}`);
@@ -91,22 +92,22 @@ function floodFillFloor(startRow, startCol, paintMode) {
         const {r, c} = queue.shift();
         map[r][c].floor = paintMode;
 
-        // Tenta ir para Esquerda (c-1). Bloqueado se houver Parede Esquerda em nós mesmos.
+        // Esquerda (c-1)
         if (c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
             visited.add(`${r},${c-1}`);
             queue.push({r, c: c-1});
         }
-        // Tenta ir para Direita (c+1). Bloqueado se houver Parede Esquerda no vizinho da direita.
+        // Direita (c+1)
         if (c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
             visited.add(`${r},${c+1}`);
             queue.push({r, c: c+1});
         }
-        // Tenta ir para Cima (r-1). Bloqueado se houver Parede Direita em nós mesmos.
+        // Cima (r-1)
         if (r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
             visited.add(`${r-1},${c}`);
             queue.push({r-1, c});
         }
-        // Tenta ir para Baixo (r+1). Bloqueado se houver Parede Direita no vizinho de baixo.
+        // Baixo (r+1)
         if (r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
             visited.add(`${r+1},${c}`);
             queue.push({r+1, c});
@@ -171,7 +172,6 @@ function drawIsometricGrid() {
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
-            // Hover simples para piso (sem caixa)
             if (row === hoverRow && col === hoverCol && !isDragging) {
                 defineTilePath(pNorte, pLeste, pSul, pOeste);
                 if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
@@ -216,7 +216,6 @@ function drawIsometricGrid() {
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     
-    // Pintura e apagamento contínuo de PISO
     if (currentBrush === 1) { 
         map[hoverRow][hoverCol].floor = 1; 
         return; 
@@ -226,7 +225,6 @@ function applySmartBrush() {
         return;
     }
 
-    // Clique único para Paredes
     let tRow = hoverRow, tCol = hoverCol, side = 'L';
     if (hoverQuadrant === 'NE') side = 'R';
     else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
@@ -277,7 +275,7 @@ canvas.addEventListener('mousemove', (e) => {
 
     if (isDragging) {
         if (currentBrush === 1 || (currentBrush === 0 && dragStartNode && dragStartNode.type === 'floor')) {
-            applySmartBrush(); // Pintura contínua
+            applySmartBrush(); 
         }
     }
 
@@ -289,11 +287,10 @@ canvas.addEventListener('mousedown', (e) => {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     saveState(); 
 
-    // NOVO: Detecta se a tecla Shift está pressionada para acionar o preenchimento!
     if (e.shiftKey && (currentBrush === 1 || currentBrush === 0)) {
         floodFillFloor(hoverRow, hoverCol, currentBrush === 1 ? 1 : 0);
         drawIsometricGrid();
-        return; // Retorna cedo para não iniciar o arrasto
+        return; 
     }
 
     isDragging = true; 
@@ -317,7 +314,7 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         if (currentBrush === 2) {
-            saveState(); // Salva a linha no histórico
+            saveState(); 
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 1;
                 else map[p.row][p.col].wallR = 1;
