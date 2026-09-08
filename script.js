@@ -12,21 +12,19 @@ const blockHeight = 32;
 let hoverCol = -1;
 let hoverRow = -1;
 let currentBrush = 1;
+let isPainting = false; // Novo: controla se o mouse está sendo arrastado
 
-// Matriz 10x10 para guardar o estado do tabuleiro
 const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = new Array(10).fill(0);
 }
 
-// Nova função para criar o "molde" invisível do piso ou da parede 3D
 function defineTilePath(row, col) {
     const x = (col - row) * (tileWidth / 2);
     const y = (col + row) * (tileHeight / 2);
 
     ctx.beginPath();
     if (map[row][col] === 2) {
-        // Contorno que envolve toda a altura do bloco 3D
         ctx.moveTo(x, y - blockHeight);
         ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2 - blockHeight);
         ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
@@ -34,7 +32,6 @@ function defineTilePath(row, col) {
         ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
         ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2 - blockHeight);
     } else {
-        // Contorno do losango plano normal (chão)
         ctx.moveTo(x, y);
         ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
         ctx.lineTo(x, y + tileHeight);
@@ -52,7 +49,7 @@ function drawIsometricGrid() {
     if (currentBrush === 1) brushName = 'Piso (Verde)';
     if (currentBrush === 2) brushName = 'Parede (Vermelho 3D)';
     ctx.fillText('Pincel atual: ' + brushName, 20, 30);
-    ctx.fillText('Tecle 1 (Piso), 2 (Parede) ou 0 (Borracha)', 20, 55);
+    ctx.fillText('Tecle 1 (Piso), 2 (Parede) ou 0 (Borracha) | Você pode clicar e arrastar!', 20, 55);
 
     ctx.save();
     ctx.translate(originX, originY);
@@ -63,7 +60,6 @@ function drawIsometricGrid() {
             const y = (col + row) * (tileHeight / 2);
 
             if (map[row][col] === 2) {
-                // Desenha as três faces da parede 3D
                 ctx.beginPath();
                 ctx.moveTo(x, y - blockHeight);
                 ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2 - blockHeight);
@@ -94,15 +90,12 @@ function drawIsometricGrid() {
                 ctx.fill();
                 ctx.stroke();
 
-                // Novo: Aplica um brilho se o mouse estiver encostando em qualquer parte da parede
                 if (row === hoverRow && col === hoverCol) {
                     defineTilePath(row, col);
                     ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
                     ctx.fill();
                 }
-
             } else {
-                // Desenha o chão
                 defineTilePath(row, col);
                 if (map[row][col] === 1) {
                     ctx.fillStyle = 'rgba(100, 200, 100, 0.6)';
@@ -121,7 +114,6 @@ function drawIsometricGrid() {
     ctx.restore();
 }
 
-// O mouse agora verifica colisão "traçando" os moldes do fundo para a frente
 canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -133,7 +125,6 @@ canvas.addEventListener('mousemove', (e) => {
     ctx.save();
     ctx.translate(originX, originY);
     
-    // Percorre na mesma ordem de desenho. O último molde que o mouse tocar (o mais à frente) vence.
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             defineTilePath(row, col);
@@ -145,14 +136,31 @@ canvas.addEventListener('mousemove', (e) => {
     }
     ctx.restore();
 
+    // Novo: Se estiver segurando o clique, pinta enquanto move
+    if (isPainting && hoverRow >= 0 && hoverRow < 10 && hoverCol >= 0 && hoverCol < 10) {
+        map[hoverRow][hoverCol] = currentBrush;
+    }
+
     drawIsometricGrid();
 });
 
+// Atualizado: Liga a pintura ao abaixar o clique
 canvas.addEventListener('mousedown', () => {
+    isPainting = true;
     if (hoverRow >= 0 && hoverRow < 10 && hoverCol >= 0 && hoverCol < 10) {
         map[hoverRow][hoverCol] = currentBrush;
         drawIsometricGrid();
     }
+});
+
+// Novo: Desliga a pintura ao soltar o clique
+canvas.addEventListener('mouseup', () => {
+    isPainting = false;
+});
+
+// Novo: Desliga a pintura se o mouse sair da tela do jogo
+canvas.addEventListener('mouseleave', () => {
+    isPainting = false;
 });
 
 window.addEventListener('keydown', (e) => {
