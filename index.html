@@ -2,11 +2,42 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>RPG Isométrico</title>
+    <title>RPG Isométrico - Construtor</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
+    <!-- Novo Menu Lateral Esquerdo -->
+    <div id="sidebar">
+        <h2>Modo Construção</h2>
+        
+        <div class="tool-section">
+            <h3>Ferramentas Básicas</h3>
+            <button id="btnPiso" class="tool-btn active">Piso (1)</button>
+            <button id="btnParede" class="tool-btn">Parede (2)</button>
+            <button id="btnBorracha" class="tool-btn">Borracha (Segure Ctrl)</button>
+        </div>
+
+        <div class="tool-section">
+            <h3>Configurações Visuais</h3>
+            <button id="btnCutaway" class="action-btn">Cutaway: LIGADO (C)</button>
+        </div>
+
+        <div class="tool-section">
+            <h3>Controles de Projeto</h3>
+            <button id="btnUndo" class="action-btn">Desfazer Ação (Ctrl+Z)</button>
+        </div>
+
+        <div id="instructions">
+            <p><strong>Arraste o mouse:</strong> Criar linhas/áreas</p>
+            <p><strong>Shift + Clique:</strong> Preencher cômodo</p>
+        </div>
+    </div>
+
+    <!-- Contêiner do Tabuleiro -->
+    <div id="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

@@ -20,8 +20,6 @@ let dragStartNode = null;
 let previewWalls = [];
 let isCutaway = true; 
 let mapHistory = [];
-
-// NOVO: Estado dinâmico da borracha
 let isErasing = false;
 
 const map = [];
@@ -32,7 +30,6 @@ for (let i = 0; i < 10; i++) {
     }
 }
 
-// BLINDAGEM: Bloqueia o clique direito do mouse em todo o documento
 document.addEventListener('contextmenu', e => e.preventDefault());
 
 function saveState() {
@@ -69,7 +66,6 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.lineTo(p2.x, p2.y - height); 
     ctx.lineTo(p1.x, p1.y - height); 
     ctx.closePath();
-    
     ctx.fillStyle = color;
     ctx.fill();
     ctx.strokeStyle = '#222'; 
@@ -145,15 +141,7 @@ function updatePreview() {
 
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'white';
-    ctx.font = '16px Arial';
     
-    let brushName = currentBrush === 1 ? 'Piso (Pincel/Preencher)' : 'Parede (Linha Reta)';
-    if (isErasing) brushName = 'Borracha (Ctrl Segurado)';
-    
-    ctx.fillText('Pincel atual: ' + brushName + ' | Modo Cutaway (C): ' + (isCutaway ? 'LIGADO' : 'DESLIGADO'), 20, 30);
-    ctx.fillText('1 (Piso), 2 (Parede). Segure CTRL para Apagar. Segure SHIFT para preencher.', 20, 55);
-
     ctx.save();
     ctx.translate(originX, originY);
 
@@ -180,7 +168,6 @@ function drawIsometricGrid() {
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
-            // Fantasma do Mouse no Piso
             if (row === hoverRow && col === hoverCol && !isDragging) {
                 defineTilePath(pNorte, pLeste, pSul, pOeste);
                 if (currentEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
@@ -254,9 +241,17 @@ function applySmartBrush() {
     }
 }
 
+// NOVO: Função para manter os botões do HTML sincronizados com o teclado e o mouse
+function updateUI() {
+    document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
+    document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
+    document.getElementById('btnBorracha').classList.toggle('active', isErasing);
+    document.getElementById('btnCutaway').innerText = isCutaway ? 'Cutaway: LIGADO (C)' : 'Cutaway: DESLIGADO (C)';
+}
+
 canvas.addEventListener('mousemove', (e) => {
-    // Atualiza estado do Ctrl para garantir precisão
     isErasing = e.ctrlKey || e.metaKey;
+    updateUI(); // Garante que a UI reaja instantaneamente ao Ctrl
 
     const rect = canvas.getBoundingClientRect();
     const adjX = (e.clientX - rect.left) - originX;
@@ -302,9 +297,9 @@ canvas.addEventListener('mousedown', (e) => {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     
     isErasing = e.ctrlKey || e.metaKey;
+    updateUI();
     saveState(); 
 
-    // ATUALIZADO: Flood Fill apaga quando o Ctrl também está segurado
     if (e.shiftKey) {
         floodFillFloor(hoverRow, hoverCol, isErasing ? 0 : 1);
         drawIsometricGrid();
@@ -355,32 +350,21 @@ canvas.addEventListener('mouseup', () => {
 canvas.addEventListener('mouseleave', () => { 
     isDragging = false; 
     dragStartNode = null;
-    isErasing = false; // Solta a borracha por segurança
+    isErasing = false; 
+    updateUI();
     updatePreview();
     drawIsometricGrid();
 });
 
-// BLINDAGEM DO TECLADO: Impede atalhos de desenvolvedor
 window.addEventListener('keydown', (e) => {
-    // Permite uso de F12 e recarregamento da página (F5)
     if (e.key === 'F12' || e.key === 'F5') return;
+    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase())) { e.preventDefault(); return; }
+    if (e.ctrlKey && e.key.toLowerCase() === 'u') { e.preventDefault(); return; }
+    if (e.altKey) { e.preventDefault(); return; }
 
-    // Bloqueia inspecionar elemento e console (Ctrl+Shift+I / J / C)
-    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase())) {
-        e.preventDefault(); return;
-    }
-    // Bloqueia exibir código fonte (Ctrl+U)
-    if (e.ctrlKey && e.key.toLowerCase() === 'u') {
-        e.preventDefault(); return;
-    }
-    // Bloqueia teclas com Alt
-    if (e.altKey) {
-        e.preventDefault(); return;
-    }
-
-    // Ctrl ou Meta ativam a borracha no jogo
     if (e.key === 'Control' || e.key === 'Meta') {
         isErasing = true;
+        updateUI();
         updatePreview();
         drawIsometricGrid();
         return;
@@ -388,13 +372,17 @@ window.addEventListener('keydown', (e) => {
 
     if (e.key === 'c' || e.key === 'C') {
         isCutaway = !isCutaway;
+        updateUI();
         drawIsometricGrid();
         return;
     }
 
-    // Permite Ctrl+Z para desfazer ações
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
+        // Dispara o botão do HTML para dar feedback visual do clique (opcional mas melhora a UX)
+        document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
+        setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
+
         if (mapHistory.length > 0) {
             const previousState = mapHistory.pop();
             for (let r = 0; r < 10; r++) {
@@ -409,23 +397,35 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    // Atalhos das ferramentas (agora sem o 0)
     if (['1','2'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
+        updateUI();
         updatePreview();
         drawIsometricGrid();
     }
 });
 
 window.addEventListener('keyup', (e) => {
-    // Desliga a borracha quando solta a tecla
     if (e.key === 'Control' || e.key === 'Meta') {
         isErasing = false;
+        updateUI();
         updatePreview();
         drawIsometricGrid();
     }
 });
 
+// LIGAÇÃO DOS BOTÕES HTML COM A LÓGICA DO JOGO
+document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
+document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
+document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
+document.getElementById('btnUndo').addEventListener('click', () => { 
+    // Simula a tecla Ctrl+Z
+    const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
+    window.dispatchEvent(event);
+});
+
+// Estado inicial da interface
+updateUI();
 drawIsometricGrid();

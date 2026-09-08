@@ -1,12 +1,99 @@
 body {
     margin: 0;
-    background-color: #222;
+    padding: 0;
+    background-color: #1a1a1a;
+    display: flex;
+    height: 100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #e2e8f0;
+    overflow: hidden;
+}
+
+#sidebar {
+    width: 260px;
+    background-color: #0f172a;
+    border-right: 1px solid #1e293b;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-shadow: 4px 0 15px rgba(0,0,0,0.5);
+    z-index: 10;
+}
+
+#sidebar h2 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+    color: #38bdf8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.tool-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tool-section h3 {
+    margin: 0;
+    font-size: 12px;
+    color: #94a3b8;
+    text-transform: uppercase;
+}
+
+button {
+    background-color: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+}
+
+button:hover {
+    background-color: #334155;
+}
+
+button.active {
+    background-color: rgba(56, 189, 248, 0.2);
+    border-color: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    color: #fff;
+}
+
+.action-btn {
+    text-align: center;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+#instructions {
+    margin-top: auto;
+    font-size: 12px;
+    color: #64748b;
+    background-color: rgba(0,0,0,0.2);
+    padding: 12px;
+    border-radius: 6px;
+}
+
+#instructions p { margin: 4px 0; }
+
+#canvas-container {
+    flex-grow: 1;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
+    background-color: #222;
+    background-image: radial-gradient(#333 1px, transparent 1px);
+    background-size: 20px 20px;
 }
+
 canvas {
-    background-color: #333;
-    box-shadow: 0 0 15px rgba(0,0,0,0.8);
+    box-shadow: 0 0 30px rgba(0,0,0,0.8);
+    background-color: #2a2a2a;
+    border-radius: 8px;
 }
