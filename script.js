@@ -11,15 +11,33 @@ const blockHeight = 48;
 
 let hoverCol = -1;
 let hoverRow = -1;
-let hoverQuadrant = 'none'; // NW, NE, SW, SE
+let hoverQuadrant = 'none';
 let currentBrush = 1;
 let isPainting = false;
+
+// NOVO: Histórico para o Desfazer (Ctrl+Z)
+let mapHistory = [];
 
 const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = [];
     for (let j = 0; j < 10; j++) {
         map[i][j] = { floor: 0, wall: 0 }; 
+    }
+}
+
+// NOVO: Clona o mapa atual e salva na memória antes de qualquer modificação
+function saveState() {
+    const snapshot = [];
+    for (let i = 0; i < 10; i++) {
+        snapshot[i] = [];
+        for (let j = 0; j < 10; j++) {
+            snapshot[i][j] = { floor: map[i][j].floor, wall: map[i][j].wall };
+        }
+    }
+    mapHistory.push(snapshot);
+    if (mapHistory.length > 30) {
+        mapHistory.shift(); // Mantém apenas os últimos 30 passos
     }
 }
 
@@ -46,14 +64,11 @@ function drawPrism(x0, y0, x1, y1, x2, y2, x3, y3, h) {
     ctx.fillStyle = '#f44336'; ctx.fill(); ctx.stroke();
 }
 
-// FUNÇÃO ATUALIZADA: Espessura reduzida e matematicamente centralizada na linha
 function getWallCoords(row, col, type) {
     const x = (col - row) * (tileWidth / 2);
     const y = (col + row) * (tileHeight / 2);
-    if (type === 'left') {
-        return [x - 2, y - 1, x + 2, y + 1, x - 30, y + 17, x - 34, y + 15];
-    }
-    return [x + 2, y - 1, x + 34, y + 15, x + 30, y + 17, x - 2, y + 1]; // right
+    if (type === 'left') return [x - 2, y - 1, x + 2, y + 1, x - 30, y + 17, x - 34, y + 15];
+    return [x + 2, y - 1, x + 34, y + 15, x + 30, y + 17, x - 2, y + 1]; 
 }
 
 function drawIsometricGrid() {
@@ -62,7 +77,7 @@ function drawIsometricGrid() {
     ctx.font = '16px Arial';
     let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso' : 'Parede 4 Cantos (Fina)');
     ctx.fillText('Pincel atual: ' + brushName, 20, 30);
-    ctx.fillText('Tecle 1 (Piso), 2 (Parede) ou 0 (Borracha) | Aponte para as 4 bordas!', 20, 55);
+    ctx.fillText('Tecle 1 (Piso), 2 (Parede) ou 0 (Borracha) | Aperte Ctrl+Z para desfazer', 20, 55);
 
     ctx.save();
     ctx.translate(originX, originY);
@@ -157,10 +172,34 @@ canvas.addEventListener('mousemove', (e) => {
     drawIsometricGrid();
 });
 
-canvas.addEventListener('mousedown', () => { isPainting = true; applySmartWall(); drawIsometricGrid(); });
+// Atualizado: Salva o estado antes de começar a pintar
+canvas.addEventListener('mousedown', () => { 
+    saveState(); 
+    isPainting = true; 
+    applySmartWall(); 
+    drawIsometricGrid(); 
+});
+
 canvas.addEventListener('mouseup', () => { isPainting = false; });
 canvas.addEventListener('mouseleave', () => { isPainting = false; });
+
+// Atualizado: Lê o Ctrl+Z para restaurar o estado
 window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (mapHistory.length > 0) {
+            const previousState = mapHistory.pop();
+            for (let r = 0; r < 10; r++) {
+                for (let c = 0; c < 10; c++) {
+                    map[r][c].floor = previousState[r][c].floor;
+                    map[r][c].wall = previousState[r][c].wall;
+                }
+            }
+            drawIsometricGrid();
+        }
+        return;
+    }
+
     if (['0','1','2'].includes(e.key)) currentBrush = parseInt(e.key);
     drawIsometricGrid();
 });
