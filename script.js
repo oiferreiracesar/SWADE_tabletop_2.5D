@@ -11,10 +11,14 @@ const originY = 100;
 let hoverCol = -1;
 let hoverRow = -1;
 
+// Matriz 10x10 para guardar o estado do tabuleiro (0 = vazio, 1 = marcado)
+const map = [];
+for (let i = 0; i < 10; i++) {
+    map[i] = new Array(10).fill(0);
+}
+
 function drawIsometricGrid() {
-    // Limpa a tela inteira antes de desenhar o próximo quadro
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
     ctx.save();
     ctx.translate(originX, originY);
 
@@ -30,8 +34,11 @@ function drawIsometricGrid() {
             ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
             ctx.closePath();
 
-            // Pinta o tile de branco se o mouse estiver em cima dele
-            if (row === hoverRow && col === hoverCol) {
+            // Pinta de verde se estiver marcado na matriz, ou branco translúcido se for hover
+            if (map[row][col] === 1) {
+                ctx.fillStyle = 'rgba(100, 200, 100, 0.6)';
+                ctx.fill();
+            } else if (row === hoverRow && col === hoverCol) {
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
                 ctx.fill();
             }
@@ -43,22 +50,25 @@ function drawIsometricGrid() {
     ctx.restore();
 }
 
-// Rastreia o movimento do mouse e converte para coordenadas isométricas
 canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-
-    // Ajusta o mouse com base na origem do nosso grid desenhado
     const adjX = mouseX - originX;
     const adjY = mouseY - originY;
 
-    // Fórmula matemática reversa da perspectiva isométrica 2:1
     hoverCol = Math.floor((adjY / tileHeight) + (adjX / tileWidth));
     hoverRow = Math.floor((adjY / tileHeight) - (adjX / tileWidth));
 
     drawIsometricGrid();
 });
 
-// Desenho inicial ao carregar a página
+// Detecta o clique e altera o estado do mapa entre 0 e 1
+canvas.addEventListener('mousedown', () => {
+    if (hoverRow >= 0 && hoverRow < 10 && hoverCol >= 0 && hoverCol < 10) {
+        map[hoverRow][hoverCol] = map[hoverRow][hoverCol] === 0 ? 1 : 0;
+        drawIsometricGrid();
+    }
+});
+
 drawIsometricGrid();
