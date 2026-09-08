@@ -21,6 +21,9 @@ let previewWalls = [];
 let isCutaway = true; 
 let mapHistory = [];
 
+// NOVO: Estado dinâmico da borracha
+let isErasing = false;
+
 const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = [];
@@ -28,6 +31,9 @@ for (let i = 0; i < 10; i++) {
         map[i][j] = { floor: 0, wallL: 0, wallR: 0 }; 
     }
 }
+
+// BLINDAGEM: Bloqueia o clique direito do mouse em todo o documento
+document.addEventListener('contextmenu', e => e.preventDefault());
 
 function saveState() {
     const snapshot = [];
@@ -81,7 +87,6 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-// CORREÇÃO: Sintaxe corrigida na hora de adicionar à fila (queue.push)
 function floodFillFloor(startRow, startCol, paintMode) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     const queue = [{r: startRow, c: startCol}];
@@ -92,22 +97,18 @@ function floodFillFloor(startRow, startCol, paintMode) {
         const {r, c} = queue.shift();
         map[r][c].floor = paintMode;
 
-        // Esquerda (c-1)
         if (c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
             visited.add(`${r},${c-1}`);
             queue.push({r: r, c: c-1});
         }
-        // Direita (c+1)
         if (c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
             visited.add(`${r},${c+1}`);
             queue.push({r: r, c: c+1});
         }
-        // Cima (r-1)
         if (r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
             visited.add(`${r-1},${c}`);
             queue.push({r: r-1, c: c});
         }
-        // Baixo (r+1)
         if (r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
             visited.add(`${r+1},${c}`);
             queue.push({r: r+1, c: c});
@@ -119,7 +120,9 @@ function updatePreview() {
     previewWalls = [];
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
-    if (currentBrush === 2 || (currentBrush === 0 && dragStartNode && dragStartNode.type === 'wall')) { 
+    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
+
+    if (currentBrush === 2 || currentEraseMode) { 
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) {
             if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
@@ -144,12 +147,17 @@ function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'white';
     ctx.font = '16px Arial';
-    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso (Pincel/Preencher)' : 'Parede (Linha Reta)');
+    
+    let brushName = currentBrush === 1 ? 'Piso (Pincel/Preencher)' : 'Parede (Linha Reta)';
+    if (isErasing) brushName = 'Borracha (Ctrl Segurado)';
+    
     ctx.fillText('Pincel atual: ' + brushName + ' | Modo Cutaway (C): ' + (isCutaway ? 'LIGADO' : 'DESLIGADO'), 20, 30);
-    ctx.fillText('PISO: Arraste para pintar ou SEGURE SHIFT + Clique para preencher o cômodo.', 20, 55);
+    ctx.fillText('1 (Piso), 2 (Parede). Segure CTRL para Apagar. Segure SHIFT para preencher.', 20, 55);
 
     ctx.save();
     ctx.translate(originX, originY);
+
+    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
@@ -172,10 +180,11 @@ function drawIsometricGrid() {
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
+            // Fantasma do Mouse no Piso
             if (row === hoverRow && col === hoverCol && !isDragging) {
                 defineTilePath(pNorte, pLeste, pSul, pOeste);
-                if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
-                else if (currentBrush === 0) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+                if (currentEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+                else if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
                 else ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
                 ctx.fill();
             }
@@ -194,7 +203,7 @@ function drawIsometricGrid() {
 
             if (pL || pR) {
                 ctx.globalAlpha = 0.7;
-                const ghostColor = currentBrush === 0 ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+                const ghostColor = currentEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
                 
                 if (pL) {
                     let hGhost = blockHeight;
@@ -216,11 +225,14 @@ function drawIsometricGrid() {
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     
+    const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
+
     if (currentBrush === 1) { 
-        map[hoverRow][hoverCol].floor = 1; 
+        map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : 1; 
         return; 
     }
-    if (currentBrush === 0 && isDragging && dragStartNode && dragStartNode.type === 'floor') {
+    
+    if (currentEraseMode && isDragging && dragStartNode && dragStartNode.type === 'floor') {
         map[hoverRow][hoverCol].floor = 0;
         return;
     }
@@ -231,7 +243,7 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
     if (tRow < 10 && tCol < 10 && !isDragging) {
-        if (currentBrush === 0) {
+        if (currentEraseMode) {
             if (side === 'L') map[tRow][tCol].wallL = 0;
             if (side === 'R') map[tRow][tCol].wallR = 0;
             map[hoverRow][hoverCol].floor = 0; 
@@ -243,6 +255,9 @@ function applySmartBrush() {
 }
 
 canvas.addEventListener('mousemove', (e) => {
+    // Atualiza estado do Ctrl para garantir precisão
+    isErasing = e.ctrlKey || e.metaKey;
+
     const rect = canvas.getBoundingClientRect();
     const adjX = (e.clientX - rect.left) - originX;
     const adjY = (e.clientY - rect.top) - originY;
@@ -274,7 +289,7 @@ canvas.addEventListener('mousemove', (e) => {
     ctx.restore();
 
     if (isDragging) {
-        if (currentBrush === 1 || (currentBrush === 0 && dragStartNode && dragStartNode.type === 'floor')) {
+        if (currentBrush === 1 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -285,10 +300,13 @@ canvas.addEventListener('mousemove', (e) => {
 
 canvas.addEventListener('mousedown', (e) => { 
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
+    
+    isErasing = e.ctrlKey || e.metaKey;
     saveState(); 
 
-    if (e.shiftKey && (currentBrush === 1 || currentBrush === 0)) {
-        floodFillFloor(hoverRow, hoverCol, currentBrush === 1 ? 1 : 0);
+    // ATUALIZADO: Flood Fill apaga quando o Ctrl também está segurado
+    if (e.shiftKey) {
+        floodFillFloor(hoverRow, hoverCol, isErasing ? 0 : 1);
         drawIsometricGrid();
         return; 
     }
@@ -296,13 +314,13 @@ canvas.addEventListener('mousedown', (e) => {
     isDragging = true; 
     
     if (currentBrush === 1) {
-        dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol };
+        dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side };
-        else if (currentBrush === 0) {
-            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol };
+        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
+        else if (isErasing) {
+            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
             applySmartBrush();
         }
     }
@@ -313,13 +331,14 @@ canvas.addEventListener('mousedown', (e) => {
 
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
-        if (currentBrush === 2) {
+        const eraseMode = dragStartNode.erase;
+        if (currentBrush === 2 && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 1;
                 else map[p.row][p.col].wallR = 1;
             });
-        } else if (currentBrush === 0 && dragStartNode && dragStartNode.type === 'wall') {
+        } else if (eraseMode && dragStartNode && dragStartNode.type === 'wall') {
             saveState();
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 0;
@@ -336,17 +355,44 @@ canvas.addEventListener('mouseup', () => {
 canvas.addEventListener('mouseleave', () => { 
     isDragging = false; 
     dragStartNode = null;
+    isErasing = false; // Solta a borracha por segurança
     updatePreview();
     drawIsometricGrid();
 });
 
+// BLINDAGEM DO TECLADO: Impede atalhos de desenvolvedor
 window.addEventListener('keydown', (e) => {
+    // Permite uso de F12 e recarregamento da página (F5)
+    if (e.key === 'F12' || e.key === 'F5') return;
+
+    // Bloqueia inspecionar elemento e console (Ctrl+Shift+I / J / C)
+    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase())) {
+        e.preventDefault(); return;
+    }
+    // Bloqueia exibir código fonte (Ctrl+U)
+    if (e.ctrlKey && e.key.toLowerCase() === 'u') {
+        e.preventDefault(); return;
+    }
+    // Bloqueia teclas com Alt
+    if (e.altKey) {
+        e.preventDefault(); return;
+    }
+
+    // Ctrl ou Meta ativam a borracha no jogo
+    if (e.key === 'Control' || e.key === 'Meta') {
+        isErasing = true;
+        updatePreview();
+        drawIsometricGrid();
+        return;
+    }
+
     if (e.key === 'c' || e.key === 'C') {
         isCutaway = !isCutaway;
         drawIsometricGrid();
         return;
     }
 
+    // Permite Ctrl+Z para desfazer ações
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (mapHistory.length > 0) {
@@ -363,10 +409,20 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['0','1','2'].includes(e.key)) {
+    // Atalhos das ferramentas (agora sem o 0)
+    if (['1','2'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
+        updatePreview();
+        drawIsometricGrid();
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    // Desliga a borracha quando solta a tecla
+    if (e.key === 'Control' || e.key === 'Meta') {
+        isErasing = false;
         updatePreview();
         drawIsometricGrid();
     }
