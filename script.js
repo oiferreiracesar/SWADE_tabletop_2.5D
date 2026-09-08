@@ -7,8 +7,8 @@ const tileWidth = 64;
 const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
-const blockHeight = 48; // Altura total da parede
-const cutawayHeight = 12; // Altura da parede quando recortada (cutaway)
+const blockHeight = 48; 
+const cutawayHeight = 12; 
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -39,14 +39,12 @@ function saveState() {
     if (mapHistory.length > 30) mapHistory.shift();
 }
 
-// Matemática Isométrica Correta: Transforma Grade (x,y) em Tela (Pixels)
 function gridToScreen(row, col) {
     const x = (col - row) * (tileWidth / 2);
     const y = (col + row) * (tileHeight / 2);
     return { x, y };
 }
 
-// O molde para detecção do mouse contnua sendo o piso plano
 function defineTilePath(pNorte, pLeste, pSul, pOeste) {
     ctx.beginPath();
     ctx.moveTo(pNorte.x, pNorte.y);
@@ -56,18 +54,17 @@ function defineTilePath(pNorte, pLeste, pSul, pOeste) {
     ctx.closePath();
 }
 
-// NOVO: Desenha a parede de um vértice ao outro, ancorada matematicamente no chão
 function drawFlatWall(p1, p2, height, color) {
     ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y); // Base inicial
-    ctx.lineTo(p2.x, p2.y); // Base final
-    ctx.lineTo(p2.x, p2.y - height); // Topo final
-    ctx.lineTo(p1.x, p1.y - height); // Topo inicial
+    ctx.moveTo(p1.x, p1.y); 
+    ctx.lineTo(p2.x, p2.y); 
+    ctx.lineTo(p2.x, p2.y - height); 
+    ctx.lineTo(p1.x, p1.y - height); 
     ctx.closePath();
     
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = '#222'; // Linha de contorno (The Sims style)
+    ctx.strokeStyle = '#222'; 
     ctx.lineWidth = 1;
     ctx.stroke();
 }
@@ -83,17 +80,14 @@ function drawIsometricGrid() {
     ctx.save();
     ctx.translate(originX, originY);
 
-    // PAINTER'S ALGORITHM: Do fundo (row=0, col=0) para a frente (row=9, col=9)
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             
-            // 1. Calcula os 4 cantos do losango atual em pixels exatos
             const pNorte = gridToScreen(row, col);
             const pLeste = gridToScreen(row, col + 1);
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            // 2. Desenha o Piso
             ctx.beginPath();
             ctx.moveTo(pNorte.x, pNorte.y);
             ctx.lineTo(pLeste.x, pLeste.y);
@@ -108,24 +102,21 @@ function drawIsometricGrid() {
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
-            // 3. Sistema de Recorte (Cutaway Rules)
+            // CORREÇÃO: Lógica de Cutaway com eixos mapeados corretamente
             let hL = blockHeight;
-            if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hL = cutawayHeight;
+            if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hL = cutawayHeight;
             
             let hR = blockHeight;
-            if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hR = cutawayHeight;
+            if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hR = cutawayHeight;
 
-            // 4. Desenha Parede Noroeste (Vértice Oeste -> Norte)
             if (map[row][col].wallL === 1) {
-                drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); // Tom escuro
+                drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
             }
             
-            // 5. Desenha Parede Nordeste (Vértice Norte -> Leste)
             if (map[row][col].wallR === 1) {
-                drawFlatWall(pNorte, pLeste, hR, '#e53935'); // Tom claro
+                drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
             }
 
-            // 6. Fantasmas e Hover (Feedback Visual)
             if (row === hoverRow && col === hoverCol) {
                 defineTilePath(pNorte, pLeste, pSul, pOeste);
                 ctx.fillStyle = (currentBrush === 1) ? 'rgba(100, 200, 100, 0.3)' : 'rgba(255, 255, 255, 0.1)';
@@ -134,9 +125,10 @@ function drawIsometricGrid() {
                 if (currentBrush === 2 || currentBrush === 0) {
                     ctx.globalAlpha = 0.5;
                     let targetRow = row, targetCol = col, side = 'L';
+                    // CORREÇÃO: O mapeamento das bordas vizinhas foi consertado
                     if (hoverQuadrant === 'NE') side = 'R';
-                    else if (hoverQuadrant === 'SW') { targetRow = row + 1; side = 'L'; }
-                    else if (hoverQuadrant === 'SE') { targetCol = col + 1; side = 'R'; }
+                    else if (hoverQuadrant === 'SW') { targetRow = row + 1; side = 'R'; } 
+                    else if (hoverQuadrant === 'SE') { targetCol = col + 1; side = 'L'; } 
                     
                     if (targetRow < 10 && targetCol < 10) {
                         const tgtNorte = gridToScreen(targetRow, targetCol);
@@ -145,8 +137,8 @@ function drawIsometricGrid() {
                         
                         let hGhost = blockHeight;
                         if (isCutaway) {
-                            if (side === 'L' && targetRow > 0 && map[targetRow - 1][targetCol].floor === 1) hGhost = cutawayHeight;
-                            if (side === 'R' && targetCol > 0 && map[targetRow][targetCol - 1].floor === 1) hGhost = cutawayHeight;
+                            if (side === 'L' && targetCol > 0 && map[targetRow][targetCol - 1].floor === 1) hGhost = cutawayHeight;
+                            if (side === 'R' && targetRow > 0 && map[targetRow - 1][targetCol].floor === 1) hGhost = cutawayHeight;
                         }
                         
                         if (side === 'L') drawFlatWall(tgtOeste, tgtNorte, hGhost, '#b71c1c');
@@ -166,9 +158,11 @@ function applySmartBrush() {
     if (currentBrush === 1) { map[hoverRow][hoverCol].floor = 1; return; }
     
     let tRow = hoverRow, tCol = hoverCol, side = 'L';
+    
+    // CORREÇÃO: O redirecionamento matemático agora encontra o parceiro geométrico exato
     if (hoverQuadrant === 'NE') side = 'R';
-    else if (hoverQuadrant === 'SW') { tRow += 1; side = 'L'; }
-    else if (hoverQuadrant === 'SE') { tCol += 1; side = 'R'; }
+    else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
+    else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
     if (tRow < 10 && tCol < 10) {
         if (currentBrush === 0) {
@@ -202,7 +196,6 @@ canvas.addEventListener('mousemove', (e) => {
             
             if (ctx.isPointInPath(e.clientX - rect.left, e.clientY - rect.top)) {
                 hoverRow = row; hoverCol = col;
-                // Mantém a inteligência de saber em qual das 4 bordas o mouse está mais perto
                 const cX = (col - row) * (tileWidth / 2);
                 const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
                 if (adjX < cX && adjY < cY) hoverQuadrant = 'NW';
