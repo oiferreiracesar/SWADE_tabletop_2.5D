@@ -10,8 +10,9 @@ const originY = 100;
 
 let hoverCol = -1;
 let hoverRow = -1;
+let currentBrush = 1; // 1 = Piso, 2 = Parede, 0 = Borracha
 
-// Matriz 10x10 para guardar o estado do tabuleiro (0 = vazio, 1 = marcado)
+// Matriz 10x10 para guardar o estado do tabuleiro
 const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = new Array(10).fill(0);
@@ -19,6 +20,16 @@ for (let i = 0; i < 10; i++) {
 
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // HUD: Texto para mostrar o pincel ativo
+    ctx.fillStyle = 'white';
+    ctx.font = '16px Arial';
+    let brushName = 'Borracha';
+    if (currentBrush === 1) brushName = 'Piso (Verde)';
+    if (currentBrush === 2) brushName = 'Parede (Vermelho)';
+    ctx.fillText('Pincel atual: ' + brushName, 20, 30);
+    ctx.fillText('Tecle 1 (Piso), 2 (Parede) ou 0 (Borracha)', 20, 55);
+
     ctx.save();
     ctx.translate(originX, originY);
 
@@ -34,12 +45,18 @@ function drawIsometricGrid() {
             ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
             ctx.closePath();
 
-            // Pinta de verde se estiver marcado na matriz, ou branco translúcido se for hover
+            // Pinta de acordo com o valor salvo na matriz
             if (map[row][col] === 1) {
-                ctx.fillStyle = 'rgba(100, 200, 100, 0.6)';
+                ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; // Verde
+                ctx.fill();
+            } else if (map[row][col] === 2) {
+                ctx.fillStyle = 'rgba(200, 100, 100, 0.8)'; // Vermelho
                 ctx.fill();
             } else if (row === hoverRow && col === hoverCol) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                // Efeito visual (hover) muda de cor conforme o pincel selecionado
+                if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 200, 100, 0.3)';
+                else if (currentBrush === 2) ctx.fillStyle = 'rgba(200, 100, 100, 0.3)';
+                else ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
                 ctx.fill();
             }
 
@@ -63,12 +80,20 @@ canvas.addEventListener('mousemove', (e) => {
     drawIsometricGrid();
 });
 
-// Detecta o clique e altera o estado do mapa entre 0 e 1
+// Clique agora aplica o pincel selecionado
 canvas.addEventListener('mousedown', () => {
     if (hoverRow >= 0 && hoverRow < 10 && hoverCol >= 0 && hoverCol < 10) {
-        map[hoverRow][hoverCol] = map[hoverRow][hoverCol] === 0 ? 1 : 0;
+        map[hoverRow][hoverCol] = currentBrush;
         drawIsometricGrid();
     }
+});
+
+// Detecta os números no teclado para trocar de pincel
+window.addEventListener('keydown', (e) => {
+    if (e.key === '0') currentBrush = 0;
+    if (e.key === '1') currentBrush = 1;
+    if (e.key === '2') currentBrush = 2;
+    drawIsometricGrid();
 });
 
 drawIsometricGrid();
