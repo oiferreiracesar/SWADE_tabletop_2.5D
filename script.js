@@ -7,16 +7,40 @@ const tileWidth = 64;
 const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
-const blockHeight = 32; // Altura da parede 3D
+const blockHeight = 32;
 
 let hoverCol = -1;
 let hoverRow = -1;
-let currentBrush = 1; // 1 = Piso, 2 = Parede, 0 = Borracha
+let currentBrush = 1;
 
 // Matriz 10x10 para guardar o estado do tabuleiro
 const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = new Array(10).fill(0);
+}
+
+// Nova função para criar o "molde" invisível do piso ou da parede 3D
+function defineTilePath(row, col) {
+    const x = (col - row) * (tileWidth / 2);
+    const y = (col + row) * (tileHeight / 2);
+
+    ctx.beginPath();
+    if (map[row][col] === 2) {
+        // Contorno que envolve toda a altura do bloco 3D
+        ctx.moveTo(x, y - blockHeight);
+        ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2 - blockHeight);
+        ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
+        ctx.lineTo(x, y + tileHeight);
+        ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
+        ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2 - blockHeight);
+    } else {
+        // Contorno do losango plano normal (chão)
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
+        ctx.lineTo(x, y + tileHeight);
+        ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
+    }
+    ctx.closePath();
 }
 
 function drawIsometricGrid() {
@@ -33,60 +57,55 @@ function drawIsometricGrid() {
     ctx.save();
     ctx.translate(originX, originY);
 
-    // A ordem de desenho da esquerda para direita, de trás pra frente,
-    // garante que os blocos 3D cubram uns aos outros corretamente.
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             const x = (col - row) * (tileWidth / 2);
             const y = (col + row) * (tileHeight / 2);
 
             if (map[row][col] === 2) {
-                // DESENHA A PAREDE 3D
-                
-                // Face do topo
+                // Desenha as três faces da parede 3D
                 ctx.beginPath();
                 ctx.moveTo(x, y - blockHeight);
                 ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2 - blockHeight);
                 ctx.lineTo(x, y + tileHeight - blockHeight);
                 ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2 - blockHeight);
                 ctx.closePath();
-                ctx.fillStyle = '#e57373'; // Cor clara simulando luz
+                ctx.fillStyle = '#e57373';
                 ctx.fill();
                 ctx.stroke();
 
-                // Face esquerda
                 ctx.beginPath();
                 ctx.moveTo(x - tileWidth / 2, y + tileHeight / 2 - blockHeight);
                 ctx.lineTo(x, y + tileHeight - blockHeight);
                 ctx.lineTo(x, y + tileHeight);
                 ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
                 ctx.closePath();
-                ctx.fillStyle = '#b71c1c'; // Cor escura simulando sombra
+                ctx.fillStyle = '#b71c1c';
                 ctx.fill();
                 ctx.stroke();
 
-                // Face direita
                 ctx.beginPath();
                 ctx.moveTo(x, y + tileHeight - blockHeight);
                 ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2 - blockHeight);
                 ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
                 ctx.lineTo(x, y + tileHeight);
                 ctx.closePath();
-                ctx.fillStyle = '#f44336'; // Cor média
+                ctx.fillStyle = '#f44336';
                 ctx.fill();
                 ctx.stroke();
 
-            } else {
-                // DESENHA O CHÃO (VAZIO OU VERDE)
-                ctx.beginPath();
-                ctx.moveTo(x, y);
-                ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
-                ctx.lineTo(x, y + tileHeight);
-                ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
-                ctx.closePath();
+                // Novo: Aplica um brilho se o mouse estiver encostando em qualquer parte da parede
+                if (row === hoverRow && col === hoverCol) {
+                    defineTilePath(row, col);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                    ctx.fill();
+                }
 
+            } else {
+                // Desenha o chão
+                defineTilePath(row, col);
                 if (map[row][col] === 1) {
-                    ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; // Piso Verde
+                    ctx.fillStyle = 'rgba(100, 200, 100, 0.6)';
                     ctx.fill();
                 } else if (row === hoverRow && col === hoverCol) {
                     if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 200, 100, 0.3)';
@@ -102,15 +121,29 @@ function drawIsometricGrid() {
     ctx.restore();
 }
 
+// O mouse agora verifica colisão "traçando" os moldes do fundo para a frente
 canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-    const adjX = mouseX - originX;
-    const adjY = mouseY - originY;
 
-    hoverCol = Math.floor((adjY / tileHeight) + (adjX / tileWidth));
-    hoverRow = Math.floor((adjY / tileHeight) - (adjX / tileWidth));
+    hoverCol = -1;
+    hoverRow = -1;
+
+    ctx.save();
+    ctx.translate(originX, originY);
+    
+    // Percorre na mesma ordem de desenho. O último molde que o mouse tocar (o mais à frente) vence.
+    for (let row = 0; row < 10; row++) {
+        for (let col = 0; col < 10; col++) {
+            defineTilePath(row, col);
+            if (ctx.isPointInPath(mouseX, mouseY)) {
+                hoverRow = row;
+                hoverCol = col;
+            }
+        }
+    }
+    ctx.restore();
 
     drawIsometricGrid();
 });
