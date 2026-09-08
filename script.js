@@ -7,9 +7,9 @@ const tileWidth = 64;
 const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
-const blockHeight = 48; 
 const cutawayHeight = 12; 
 
+let blockHeight = 48; 
 let hoverCol = -1;
 let hoverRow = -1;
 let hoverQuadrant = 'none';
@@ -416,16 +416,21 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
+// LIGAÇÃO DO SLIDER DE ALTURA DA PAREDE
+document.getElementById('sliderAltura').addEventListener('input', (e) => {
+    blockHeight = parseInt(e.target.value);
+    document.getElementById('valorAltura').innerText = blockHeight;
+    drawIsometricGrid(); // Redesenha a tela em tempo real
+});
+
 // LIGAÇÃO DOS BOTÕES HTML COM A LÓGICA DO JOGO
 document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
-    // Simula a tecla Ctrl+Z
     const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
     window.dispatchEvent(event);
 });
 
-// Estado inicial da interface
 updateUI();
 drawIsometricGrid();

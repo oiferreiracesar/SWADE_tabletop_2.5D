@@ -6,7 +6,6 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Novo Menu Lateral Esquerdo -->
     <div id="sidebar">
         <h2>Modo Construção</h2>
         
@@ -15,6 +14,12 @@
             <button id="btnPiso" class="tool-btn active">Piso (1)</button>
             <button id="btnParede" class="tool-btn">Parede (2)</button>
             <button id="btnBorracha" class="tool-btn">Borracha (Segure Ctrl)</button>
+        </div>
+
+        <!-- NOVA SEÇÃO: Controle de Altura -->
+        <div class="tool-section">
+            <h3>Altura da Parede: <span id="valorAltura">48</span>px</h3>
+            <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">
         </div>
 
         <div class="tool-section">
@@ -33,7 +38,6 @@
         </div>
     </div>
 
-    <!-- Contêiner do Tabuleiro -->
     <div id="canvas-container">
         <canvas id="gameCanvas"></canvas>
     </div>
