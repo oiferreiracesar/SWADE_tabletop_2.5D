@@ -7,9 +7,11 @@ const tileWidth = 64;
 const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
+
+// Agora essa variável serve apenas para ditar a altura da PRÓXIMA parede
+let blockHeight = 48; 
 const cutawayHeight = 12; 
 
-let blockHeight = 48; 
 let hoverCol = -1;
 let hoverRow = -1;
 let hoverQuadrant = 'none';
@@ -26,6 +28,7 @@ const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = [];
     for (let j = 0; j < 10; j++) {
+        // wallL e wallR agora guardam a ALTURA da parede (0 = sem parede)
         map[i][j] = { floor: 0, wallL: 0, wallR: 0 }; 
     }
 }
@@ -176,18 +179,20 @@ function drawIsometricGrid() {
                 ctx.fill();
             }
 
-            let hL = blockHeight;
+            // ATUALIZADO: Lê a altura individual registrada no mapa
+            let hL = map[row][col].wallL;
             if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hL = cutawayHeight;
             
-            let hR = blockHeight;
-            if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hR = cutawayHeight;
+            let hR = map[row][col].wallR;
+            if (isCutaway && row > 0 && map[row - 1].floor === 1) hR = cutawayHeight;
 
-            if (map[row][col].wallL === 1) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
-            if (map[row][col].wallR === 1) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
+            if (map[row][col].wallL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
+            if (map[row][col].wallR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
             const pL = previewWalls.find(p => p.row === row && p.col === col && p.side === 'L');
             const pR = previewWalls.find(p => p.row === row && p.col === col && p.side === 'R');
 
+            // Renderiza o fantasma da parede (usa o blockHeight do slider atual)
             if (pL || pR) {
                 ctx.globalAlpha = 0.7;
                 const ghostColor = currentEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
@@ -235,13 +240,13 @@ function applySmartBrush() {
             if (side === 'R') map[tRow][tCol].wallR = 0;
             map[hoverRow][hoverCol].floor = 0; 
         } else if (currentBrush === 2) {
-            if (side === 'L') map[tRow][tCol].wallL = 1;
-            if (side === 'R') map[tRow][tCol].wallR = 1;
+            // ATUALIZADO: Salva a altura do slider em vez de apenas "1"
+            if (side === 'L') map[tRow][tCol].wallL = blockHeight;
+            if (side === 'R') map[tRow][tCol].wallR = blockHeight;
         }
     }
 }
 
-// NOVO: Função para manter os botões do HTML sincronizados com o teclado e o mouse
 function updateUI() {
     document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
@@ -249,9 +254,17 @@ function updateUI() {
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Cutaway: LIGADO (C)' : 'Cutaway: DESLIGADO (C)';
 }
 
+// LIGAÇÃO DO SLIDER DE ALTURA DA PAREDE
+document.getElementById('sliderAltura').addEventListener('input', (e) => {
+    blockHeight = parseInt(e.target.value);
+    document.getElementById('valorAltura').innerText = blockHeight;
+    updatePreview();
+    drawIsometricGrid();
+});
+
 canvas.addEventListener('mousemove', (e) => {
     isErasing = e.ctrlKey || e.metaKey;
-    updateUI(); // Garante que a UI reaja instantaneamente ao Ctrl
+    updateUI(); 
 
     const rect = canvas.getBoundingClientRect();
     const adjX = (e.clientX - rect.left) - originX;
@@ -330,8 +343,9 @@ canvas.addEventListener('mouseup', () => {
         if (currentBrush === 2 && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
-                if (p.side === 'L') map[p.row][p.col].wallL = 1;
-                else map[p.row][p.col].wallR = 1;
+                // ATUALIZADO: Salva a altura do slider no arrastar e soltar
+                if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
+                else map[p.row][p.col].wallR = blockHeight;
             });
         } else if (eraseMode && dragStartNode && dragStartNode.type === 'wall') {
             saveState();
@@ -379,7 +393,6 @@ window.addEventListener('keydown', (e) => {
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        // Dispara o botão do HTML para dar feedback visual do clique (opcional mas melhora a UX)
         document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
         setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
 
@@ -416,14 +429,6 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
-// LIGAÇÃO DO SLIDER DE ALTURA DA PAREDE
-document.getElementById('sliderAltura').addEventListener('input', (e) => {
-    blockHeight = parseInt(e.target.value);
-    document.getElementById('valorAltura').innerText = blockHeight;
-    drawIsometricGrid(); // Redesenha a tela em tempo real
-});
-
-// LIGAÇÃO DOS BOTÕES HTML COM A LÓGICA DO JOGO
 document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
