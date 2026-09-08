@@ -46,18 +46,21 @@ function drawPrism(x0, y0, x1, y1, x2, y2, x3, y3, h) {
     ctx.fillStyle = '#f44336'; ctx.fill(); ctx.stroke();
 }
 
+// FUNÇÃO ATUALIZADA: Espessura reduzida e matematicamente centralizada na linha
 function getWallCoords(row, col, type) {
     const x = (col - row) * (tileWidth / 2);
     const y = (col + row) * (tileHeight / 2);
-    if (type === 'left') return [x, y, x + 8, y + 4, x - 24, y + 20, x - 32, y + 16];
-    return [x, y, x + 32, y + 16, x + 24, y + 20, x - 8, y + 4]; // right
+    if (type === 'left') {
+        return [x - 2, y - 1, x + 2, y + 1, x - 30, y + 17, x - 34, y + 15];
+    }
+    return [x + 2, y - 1, x + 34, y + 15, x + 30, y + 17, x - 2, y + 1]; // right
 }
 
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'white';
     ctx.font = '16px Arial';
-    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso' : 'Parede 4 Cantos');
+    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso' : 'Parede 4 Cantos (Fina)');
     ctx.fillText('Pincel atual: ' + brushName, 20, 30);
     ctx.fillText('Tecle 1 (Piso), 2 (Parede) ou 0 (Borracha) | Aponte para as 4 bordas!', 20, 55);
 
@@ -80,7 +83,6 @@ function drawIsometricGrid() {
             if (map[row][col].wall === 1 || map[row][col].wall === 3) drawPrism(...getWallCoords(row, col, 'left'), blockHeight);
             if (map[row][col].wall === 2 || map[row][col].wall === 3) drawPrism(...getWallCoords(row, col, 'right'), blockHeight);
 
-            // Fantasma e Hover
             if (row === hoverRow && col === hoverCol) {
                 defineTilePath(row, col);
                 ctx.fillStyle = (currentBrush === 1) ? 'rgba(100, 200, 100, 0.3)' : 'rgba(255, 255, 255, 0.1)';
@@ -118,7 +120,7 @@ function applySmartWall() {
         if (currentBrush === 0) {
             if (side === 'left') map[tRow][tCol].wall = (map[tRow][tCol].wall === 3) ? 2 : (map[tRow][tCol].wall === 1 ? 0 : map[tRow][tCol].wall);
             else map[tRow][tCol].wall = (map[tRow][tCol].wall === 3) ? 1 : (map[tRow][tCol].wall === 2 ? 0 : map[tRow][tCol].wall);
-            map[hoverRow][hoverCol].floor = 0; // Borracha também apaga o chão sob o mouse
+            map[hoverRow][hoverCol].floor = 0; 
         } else if (currentBrush === 2) {
             if (side === 'left') map[tRow][tCol].wall = (map[tRow][tCol].wall === 2) ? 3 : 1;
             else map[tRow][tCol].wall = (map[tRow][tCol].wall === 1) ? 3 : 2;
