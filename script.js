@@ -14,45 +14,41 @@ let hoverRow = -1;
 let hoverQuadrant = 'none';
 let currentBrush = 1;
 let isPainting = false;
+let isCutaway = true; // NOVO: Controle do modo de visualização das paredes
 
-// NOVO: Memória histórica para o sistema de Desfazer
 let mapHistory = [];
 
+// ESTRUTURA REFEITA (Ponto 1): Arestas independentes
 const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = [];
     for (let j = 0; j < 10; j++) {
-        map[i][j] = { floor: 0, wall: 0 }; 
+        map[i][j] = { floor: 0, wallL: 0, wallR: 0 }; 
     }
 }
 
-// NOVO: Tira uma "fotografia" do estado atual do mapa antes de qualquer alteração
 function saveState() {
     const snapshot = [];
     for (let i = 0; i < 10; i++) {
         snapshot[i] = [];
         for (let j = 0; j < 10; j++) {
-            // Clona os valores exatos para evitar ligação de referência
-            snapshot[i][j] = { floor: map[i][j].floor, wall: map[i][j].wall };
+            snapshot[i][j] = { floor: map[i][j].floor, wallL: map[i][j].wallL, wallR: map[i][j].wallR };
         }
     }
     mapHistory.push(snapshot);
-    if (mapHistory.length > 30) {
-        mapHistory.shift(); // Proteção de memória: guarda apenas as últimas 30 ações
-    }
+    if (mapHistory.length > 30) mapHistory.shift();
 }
 
+// O molde do mouse agora é sempre o losango plano do chão. 
+// Isso garante precisão ao clicar perto das arestas para construir/apagar.
 function defineTilePath(row, col) {
     const x = (col - row) * (tileWidth / 2);
     const y = (col + row) * (tileHeight / 2);
-    const h = map[row][col].wall > 0 ? blockHeight : 0;
     ctx.beginPath();
-    ctx.moveTo(x, y - h);
-    ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2 - h);
+    ctx.moveTo(x, y);
     ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
     ctx.lineTo(x, y + tileHeight);
     ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
-    ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2 - h);
     ctx.closePath();
 }
 
@@ -78,29 +74,46 @@ function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'white';
     ctx.font = '16px Arial';
-    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso' : 'Parede 4 Cantos (Fina)');
-    ctx.fillText('Pincel atual: ' + brushName, 20, 30);
-    ctx.fillText('Tecle 1 (Piso), 2 (Parede), 0 (Borracha) | Aperte Ctrl+Z para desfazer!', 20, 55);
+    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso' : 'Parede (Aresta)');
+    ctx.fillText('Pincel atual: ' + brushName + ' | Modo Cutaway (Tecla C): ' + (isCutaway ? 'LIGADO' : 'DESLIGADO'), 20, 30);
+    ctx.fillText('Tecle 1 (Piso), 2 (Parede), 0 (Borracha), C (Cutaway), Ctrl+Z (Desfazer)', 20, 55);
 
     ctx.save();
     ctx.translate(originX, originY);
 
+    // ORDENAÇÃO DE RENDERIZAÇÃO (Ponto 2): Painter's Algorithm estrito
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             const x = (col - row) * (tileWidth / 2);
             const y = (col + row) * (tileHeight / 2);
 
+            // 1. PISO
             ctx.beginPath();
             ctx.moveTo(x, y); ctx.lineTo(x + tileWidth / 2, y + tileHeight / 2);
             ctx.lineTo(x, y + tileHeight); ctx.lineTo(x - tileWidth / 2, y + tileHeight / 2);
             ctx.closePath();
             
-            if (map[row][col].floor === 1) { ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; ctx.fill(); }
+            if (map[row][col].floor === 1) { 
+                ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; ctx.fill(); 
+            }
             ctx.strokeStyle = '#555'; ctx.stroke();
 
-            if (map[row][col].wall === 1 || map[row][col].wall === 3) drawPrism(...getWallCoords(row, col, 'left'), blockHeight);
-            if (map[row][col].wall === 2 || map[row][col].wall === 3) drawPrism(...getWallCoords(row, col, 'right'), blockHeight);
+            // 2. PAREDES DE TRÁS (Noroeste / Nordeste da célula)
+            
+            // SISTEMA CUTAWAY (Ponto 3): Rebaixa a parede se houver piso atrás dela
+            let hL = blockHeight;
+            if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hL = 12; // Rebaixa
+            
+            let hR = blockHeight;
+            if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hR = 12; // Rebaixa
 
+            // Desenha a Parede Esquerda (se existir)
+            if (map[row][col].wallL === 1) drawPrism(...getWallCoords(row, col, 'left'), hL);
+            
+            // Desenha a Parede Direita (se existir)
+            if (map[row][col].wallR === 1) drawPrism(...getWallCoords(row, col, 'right'), hR);
+
+            // 3. FANTASMAS E HOVER
             if (row === hoverRow && col === hoverCol) {
                 defineTilePath(row, col);
                 ctx.fillStyle = (currentBrush === 1) ? 'rgba(100, 200, 100, 0.3)' : 'rgba(255, 255, 255, 0.1)';
@@ -114,7 +127,12 @@ function drawIsometricGrid() {
                     else if (hoverQuadrant === 'SE') { targetCol = col + 1; side = 'right'; }
                     
                     if (targetRow < 10 && targetCol < 10) {
-                        drawPrism(...getWallCoords(targetRow, targetCol, side), blockHeight);
+                        let hGhost = blockHeight;
+                        if (isCutaway) {
+                            if (side === 'left' && targetRow > 0 && map[targetRow - 1][targetCol].floor === 1) hGhost = 12;
+                            if (side === 'right' && targetCol > 0 && map[targetRow][targetCol - 1].floor === 1) hGhost = 12;
+                        }
+                        drawPrism(...getWallCoords(targetRow, targetCol, side), hGhost);
                     }
                     ctx.globalAlpha = 1.0;
                 }
@@ -124,24 +142,28 @@ function drawIsometricGrid() {
     ctx.restore();
 }
 
-function applySmartWall() {
+function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     
+    // Piso
     if (currentBrush === 1) { map[hoverRow][hoverCol].floor = 1; return; }
     
-    let tRow = hoverRow, tCol = hoverCol, side = 'left';
-    if (hoverQuadrant === 'NE') side = 'right';
-    else if (hoverQuadrant === 'SW') { tRow += 1; side = 'left'; }
-    else if (hoverQuadrant === 'SE') { tCol += 1; side = 'right'; }
+    // Direcionamento da Aresta (Sul/Leste redireciona para o Norte/Oeste do vizinho da frente)
+    let tRow = hoverRow, tCol = hoverCol, side = 'L';
+    if (hoverQuadrant === 'NE') side = 'R';
+    else if (hoverQuadrant === 'SW') { tRow += 1; side = 'L'; }
+    else if (hoverQuadrant === 'SE') { tCol += 1; side = 'R'; }
 
     if (tRow < 10 && tCol < 10) {
         if (currentBrush === 0) {
-            if (side === 'left') map[tRow][tCol].wall = (map[tRow][tCol].wall === 3) ? 2 : (map[tRow][tCol].wall === 1 ? 0 : map[tRow][tCol].wall);
-            else map[tRow][tCol].wall = (map[tRow][tCol].wall === 3) ? 1 : (map[tRow][tCol].wall === 2 ? 0 : map[tRow][tCol].wall);
+            // Borracha: Apaga a aresta focada e o piso abaixo
+            if (side === 'L') map[tRow][tCol].wallL = 0;
+            if (side === 'R') map[tRow][tCol].wallR = 0;
             map[hoverRow][hoverCol].floor = 0; 
         } else if (currentBrush === 2) {
-            if (side === 'left') map[tRow][tCol].wall = (map[tRow][tCol].wall === 2) ? 3 : 1;
-            else map[tRow][tCol].wall = (map[tRow][tCol].wall === 1) ? 3 : 2;
+            // Parede: Grava na aresta exata
+            if (side === 'L') map[tRow][tCol].wallL = 1;
+            if (side === 'R') map[tRow][tCol].wallR = 1;
         }
     }
 }
@@ -171,32 +193,37 @@ canvas.addEventListener('mousemove', (e) => {
     }
     ctx.restore();
 
-    if (isPainting) applySmartWall();
+    if (isPainting) applySmartBrush();
     drawIsometricGrid();
 });
 
-// ATUALIZADO: Agora salva o estado ANTES de começar a pintar
 canvas.addEventListener('mousedown', () => { 
     saveState(); 
     isPainting = true; 
-    applySmartWall(); 
+    applySmartBrush(); 
     drawIsometricGrid(); 
 });
 
 canvas.addEventListener('mouseup', () => { isPainting = false; });
 canvas.addEventListener('mouseleave', () => { isPainting = false; });
 
-// ATUALIZADO: Lê o Ctrl+Z (ou Cmd+Z no Mac) para restaurar a memória
 window.addEventListener('keydown', (e) => {
+    // Tecla C alterna o Cutaway
+    if (e.key === 'c' || e.key === 'C') {
+        isCutaway = !isCutaway;
+        drawIsometricGrid();
+        return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (mapHistory.length > 0) {
             const previousState = mapHistory.pop();
-            // Restaura o mapa fielmente copiando a foto
             for (let r = 0; r < 10; r++) {
                 for (let c = 0; c < 10; c++) {
                     map[r][c].floor = previousState[r][c].floor;
-                    map[r][c].wall = previousState[r][c].wall;
+                    map[r][c].wallL = previousState[r][c].wallL;
+                    map[r][c].wallR = previousState[r][c].wallR;
                 }
             }
             drawIsometricGrid();
