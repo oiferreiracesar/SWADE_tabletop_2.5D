@@ -15,11 +15,9 @@ let hoverRow = -1;
 let hoverQuadrant = 'none';
 let currentBrush = 1;
 
-// NOVO: Máquina de estados para arrastar e planejar de A a B
 let isDragging = false;
 let dragStartNode = null; 
 let previewWalls = [];
-let previewFloors = [];
 let isCutaway = true; 
 let mapHistory = [];
 
@@ -73,7 +71,6 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.stroke();
 }
 
-// NOVO: Função utilitária para saber exatamente em qual aresta o mouse está mirando
 function getTargetEdge(hRow, hCol, hQuad) {
     if (hRow < 0 || hRow >= 10 || hCol < 0 || hCol >= 10) return null;
     let tRow = hRow, tCol = hCol, side = 'L';
@@ -84,52 +81,60 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-// NOVO: Gera os "fantasmas" matemáticos do Ponto A até o Ponto B
+// NOVO: Algoritmo de Preenchimento (Flood Fill) colidindo nas arestas exatas
+function floodFillFloor(startRow, startCol, paintMode) {
+    const queue = [{r: startRow, c: startCol}];
+    const visited = new Set();
+    visited.add(`${startRow},${startCol}`);
+
+    while(queue.length > 0) {
+        const {r, c} = queue.shift();
+        map[r][c].floor = paintMode;
+
+        // Tenta ir para Esquerda (c-1). Bloqueado se houver Parede Esquerda em nós mesmos.
+        if (c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
+            visited.add(`${r},${c-1}`);
+            queue.push({r, c: c-1});
+        }
+        // Tenta ir para Direita (c+1). Bloqueado se houver Parede Esquerda no vizinho da direita.
+        if (c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
+            visited.add(`${r},${c+1}`);
+            queue.push({r, c: c+1});
+        }
+        // Tenta ir para Cima (r-1). Bloqueado se houver Parede Direita em nós mesmos.
+        if (r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
+            visited.add(`${r-1},${c}`);
+            queue.push({r-1, c});
+        }
+        // Tenta ir para Baixo (r+1). Bloqueado se houver Parede Direita no vizinho de baixo.
+        if (r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
+            visited.add(`${r+1},${c}`);
+            queue.push({r+1, c});
+        }
+    }
+}
+
 function updatePreview() {
     previewWalls = [];
-    previewFloors = [];
-
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
-    if (currentBrush === 1) { 
-        // Lógica do Piso (Cria uma caixa do Ponto A ao Ponto B)
-        if (isDragging && dragStartNode && dragStartNode.type === 'floor') {
-            const minR = Math.min(dragStartNode.row, hoverRow);
-            const maxR = Math.max(dragStartNode.row, hoverRow);
-            const minC = Math.min(dragStartNode.col, hoverCol);
-            const maxC = Math.max(dragStartNode.col, hoverCol);
-            for (let r = minR; r <= maxR; r++) {
-                for (let c = minC; c <= maxC; c++) {
-                    previewFloors.push({ row: r, col: c });
-                }
-            }
-        } else {
-            previewFloors.push({ row: hoverRow, col: hoverCol });
-        }
-    } else if (currentBrush === 2 || currentBrush === 0) { 
-        // Lógica da Parede e Borracha (Cria uma linha reta ancorada no eixo)
+    if (currentBrush === 2 || (currentBrush === 0 && dragStartNode && dragStartNode.type === 'wall')) { 
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) {
             if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
                 const start = dragStartNode;
                 if (start.side === 'L') {
-                    // Trava o eixo Col e estica na Linha (Row)
                     const minR = Math.min(start.row, edge.row);
                     const maxR = Math.max(start.row, edge.row);
                     for (let r = minR; r <= maxR; r++) previewWalls.push({ row: r, col: start.col, side: 'L' });
                 } else {
-                    // Trava o eixo Row e estica na Coluna (Col)
                     const minC = Math.min(start.col, edge.col);
                     const maxC = Math.max(start.col, edge.col);
                     for (let c = minC; c <= maxC; c++) previewWalls.push({ row: start.row, col: c, side: 'R' });
                 }
-            } else {
-                previewWalls.push(edge); // Apenas Hover normal
+            } else if (!isDragging) {
+                previewWalls.push(edge);
             }
-        }
-        // Se for a borracha, ilumina também o piso debaixo do mouse para apagar
-        if (currentBrush === 0 && !isDragging) {
-            previewFloors.push({ row: hoverRow, col: hoverCol });
         }
     }
 }
@@ -138,9 +143,9 @@ function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'white';
     ctx.font = '16px Arial';
-    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso (Retângulo)' : 'Parede (Linha Reta)');
-    ctx.fillText('Pincel atual: ' + brushName + ' | Modo Cutaway (Tecla C): ' + (isCutaway ? 'LIGADO' : 'DESLIGADO'), 20, 30);
-    ctx.fillText('Tecle 1 (Piso), 2 (Parede), 0 (Borracha), C (Cutaway) | CLIQUE E ARRASTE!', 20, 55);
+    let brushName = currentBrush === 0 ? 'Borracha' : (currentBrush === 1 ? 'Piso (Pincel/Preencher)' : 'Parede (Linha Reta)');
+    ctx.fillText('Pincel atual: ' + brushName + ' | Modo Cutaway (C): ' + (isCutaway ? 'LIGADO' : 'DESLIGADO'), 20, 30);
+    ctx.fillText('PISO: Arraste para pintar ou SEGURE SHIFT + Clique para preencher o cômodo.', 20, 55);
 
     ctx.save();
     ctx.translate(originX, originY);
@@ -166,15 +171,12 @@ function drawIsometricGrid() {
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
-            // Renderiza Fantasma do Piso embaixo das paredes
-            const isFloorPreview = previewFloors.some(p => p.row === row && p.col === col);
-            if (isFloorPreview) {
+            // Hover simples para piso (sem caixa)
+            if (row === hoverRow && col === hoverCol && !isDragging) {
                 defineTilePath(pNorte, pLeste, pSul, pOeste);
-                ctx.fillStyle = (currentBrush === 1) ? 'rgba(100, 255, 100, 0.4)' : 'rgba(255, 50, 50, 0.4)';
-                ctx.fill();
-            } else if (row === hoverRow && col === hoverCol && !isDragging) {
-                defineTilePath(pNorte, pLeste, pSul, pOeste);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
+                else if (currentBrush === 0) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+                else ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
                 ctx.fill();
             }
 
@@ -187,7 +189,6 @@ function drawIsometricGrid() {
             if (map[row][col].wallL === 1) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
             if (map[row][col].wallR === 1) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
-            // Renderiza Fantasma da Parede obedecendo a ordem de profundidade
             const pL = previewWalls.find(p => p.row === row && p.col === col && p.side === 'L');
             const pR = previewWalls.find(p => p.row === row && p.col === col && p.side === 'R');
 
@@ -210,6 +211,37 @@ function drawIsometricGrid() {
         }
     }
     ctx.restore();
+}
+
+function applySmartBrush() {
+    if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
+    
+    // Pintura e apagamento contínuo de PISO
+    if (currentBrush === 1) { 
+        map[hoverRow][hoverCol].floor = 1; 
+        return; 
+    }
+    if (currentBrush === 0 && isDragging && dragStartNode && dragStartNode.type === 'floor') {
+        map[hoverRow][hoverCol].floor = 0;
+        return;
+    }
+
+    // Clique único para Paredes
+    let tRow = hoverRow, tCol = hoverCol, side = 'L';
+    if (hoverQuadrant === 'NE') side = 'R';
+    else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
+    else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
+
+    if (tRow < 10 && tCol < 10 && !isDragging) {
+        if (currentBrush === 0) {
+            if (side === 'L') map[tRow][tCol].wallL = 0;
+            if (side === 'R') map[tRow][tCol].wallR = 0;
+            map[hoverRow][hoverCol].floor = 0; 
+        } else if (currentBrush === 2) {
+            if (side === 'L') map[tRow][tCol].wallL = 1;
+            if (side === 'R') map[tRow][tCol].wallR = 1;
+        }
+    }
 }
 
 canvas.addEventListener('mousemove', (e) => {
@@ -243,44 +275,59 @@ canvas.addEventListener('mousemove', (e) => {
     }
     ctx.restore();
 
+    if (isDragging) {
+        if (currentBrush === 1 || (currentBrush === 0 && dragStartNode && dragStartNode.type === 'floor')) {
+            applySmartBrush(); // Pintura contínua
+        }
+    }
+
     updatePreview();
     drawIsometricGrid();
 });
 
-// Captura o Ponto A
-canvas.addEventListener('mousedown', () => { 
+canvas.addEventListener('mousedown', (e) => { 
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
+    saveState(); 
+
+    // NOVO: Detecta se a tecla Shift está pressionada para acionar o preenchimento!
+    if (e.shiftKey && (currentBrush === 1 || currentBrush === 0)) {
+        floodFillFloor(hoverRow, hoverCol, currentBrush === 1 ? 1 : 0);
+        drawIsometricGrid();
+        return; // Retorna cedo para não iniciar o arrasto
+    }
+
     isDragging = true; 
     
     if (currentBrush === 1) {
         dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol };
+        applySmartBrush(); 
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side };
+        else if (currentBrush === 0) {
+            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol };
+            applySmartBrush();
+        }
     }
     
     updatePreview();
     drawIsometricGrid(); 
 });
 
-// Entrega no Ponto B
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
-        saveState(); // Salva a foto para o Ctrl+Z antes de comitar a linha
-        
-        if (currentBrush === 1) {
-            previewFloors.forEach(p => { map[p.row][p.col].floor = 1; });
-        } else if (currentBrush === 2) {
+        if (currentBrush === 2) {
+            saveState(); // Salva a linha no histórico
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 1;
                 else map[p.row][p.col].wallR = 1;
             });
-        } else if (currentBrush === 0) {
+        } else if (currentBrush === 0 && dragStartNode && dragStartNode.type === 'wall') {
+            saveState();
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 0;
                 else map[p.row][p.col].wallR = 0;
             });
-            if (!dragStartNode) previewFloors.forEach(p => { map[p.row][p.col].floor = 0; });
         }
     }
     isDragging = false; 
@@ -289,7 +336,6 @@ canvas.addEventListener('mouseup', () => {
     drawIsometricGrid();
 });
 
-// Cancela a ação se o mouse sair da tela sem soltar
 canvas.addEventListener('mouseleave', () => { 
     isDragging = false; 
     dragStartNode = null;
