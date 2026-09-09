@@ -90,31 +90,29 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-// NOVO: Lê as paredes diagonais para decidir se o piso será inteiro ou fatiado na metade
 function getFloorType(r, c, enterDir, hQuad) {
     const wWE = map[r][c].wallWE > 0;
     const wNS = map[r][c].wallNS > 0;
     
     if (wWE) {
-        if (enterDir === 'NW' || enterDir === 'NE') return 2; // Metade Cima-Esquerda
-        if (enterDir === 'SW' || enterDir === 'SE') return 3; // Metade Baixo-Direita
+        if (enterDir === 'NW' || enterDir === 'NE') return 2;
+        if (enterDir === 'SW' || enterDir === 'SE') return 3; 
         if (enterDir === 'CLICK') {
             if (hQuad === 'NW' || hQuad === 'NE') return 2;
             if (hQuad === 'SW' || hQuad === 'SE') return 3;
         }
     }
     if (wNS) {
-        if (enterDir === 'NW' || enterDir === 'SW') return 4; // Metade Baixo-Esquerda
-        if (enterDir === 'NE' || enterDir === 'SE') return 5; // Metade Cima-Direita
+        if (enterDir === 'NW' || enterDir === 'SW') return 4; 
+        if (enterDir === 'NE' || enterDir === 'SE') return 5; 
         if (enterDir === 'CLICK') {
             if (hQuad === 'NW' || hQuad === 'SW') return 4;
             if (hQuad === 'NE' || hQuad === 'SE') return 5;
         }
     }
-    return 1; // Piso Inteiro
+    return 1; 
 }
 
-// ATUALIZADO: O Flood Fill agora se espalha usando a física dos "Meios-Pisos"
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     
@@ -133,7 +131,6 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
         
         if (paintMode === 0 && spreadType === 0) continue;
 
-        // Regras restritas: Metades de piso só se espalham pelos lados que estão abertos
         const canNW = [1, 2, 4].includes(spreadType);
         const canNE = [1, 2, 5].includes(spreadType);
         const canSW = [1, 3, 4].includes(spreadType);
@@ -174,19 +171,17 @@ function updatePreview() {
             const dR = hoverRow - start.row;
             const dC = hoverCol - start.col;
 
+            // CORREÇÃO: Alinhamento perfeito da linha diagonal solta
             if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
                 const steps = Math.abs(dR);
                 const rDir = dR > 0 ? 1 : -1;
                 const cDir = dC > 0 ? 1 : -1;
-                for (let i = 0; i < steps; i++) {
-                    if (rDir === cDir) {
-                        const r = start.row + (rDir > 0 ? i : -1 - i);
-                        const c = start.col + (cDir > 0 ? i : -1 - i);
-                        if (r >= 0 && r < 10 && c >= 0 && c < 10) previewWalls.push({ row: r, col: c, side: 'NS' });
-                    } else {
-                        const r = start.row + (rDir > 0 ? i : -1 - i);
-                        const c = start.col + (cDir > 0 ? i : -1 - i);
-                        if (r >= 0 && r < 10 && c >= 0 && c < 10) previewWalls.push({ row: r, col: c, side: 'WE' });
+                for (let i = 0; i <= steps; i++) {
+                    const r = start.row + (i * rDir);
+                    const c = start.col + (i * cDir);
+                    if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+                        if (rDir === cDir) previewWalls.push({ row: r, col: c, side: 'NS' });
+                        else previewWalls.push({ row: r, col: c, side: 'WE' });
                     }
                 }
             } 
@@ -228,22 +223,38 @@ function updatePreview() {
             const maxR = Math.max(dragStartNode.row, hoverRow);
             const minC = Math.min(dragStartNode.col, hoverCol);
             const maxC = Math.max(dragStartNode.col, hoverCol);
-            const dR = maxR - minR;
-            const dC = maxC - minC;
+            const steps = Math.min(maxR - minR, maxC - minC); 
+            
+            if (steps === 0) return;
 
-            if (dR === dC && dR > 0) {
-                for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
-                for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
-                for (let i = 0; i <= dR; i++) {
-                    const r = maxR - i;
-                    const c = minC + i;
-                    if (r >= 0 && r < 10 && c >= 0 && c < 10) previewWalls.push({ row: r, col: c, side: 'WE' });
-                }
-            } else {
-                for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
-                for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
-                for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
-                for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
+            const M_R = minR + steps;
+            const M_C = minC + steps;
+
+            // CORREÇÃO: Lê a direção do mouse para saber para onde apontar o triângulo
+            const dragSE = hoverRow >= dragStartNode.row && hoverCol >= dragStartNode.col;
+            const dragNW = hoverRow < dragStartNode.row && hoverCol < dragStartNode.col;
+            const dragNE = hoverRow < dragStartNode.row && hoverCol >= dragStartNode.col;
+            const dragSW = hoverRow >= dragStartNode.row && hoverCol < dragStartNode.col;
+
+            if (dragSE) { // Triângulo base em cima (Norte)
+                for (let r = minR; r <= M_R; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
+                for (let c = minC; c <= M_C; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
+                for (let i = 0; i <= steps; i++) if (M_R - i >= 0 && minC + i < 10) previewWalls.push({ row: M_R - i, col: minC + i, side: 'WE' });
+            } 
+            else if (dragNW) { // Triângulo base em baixo (Sul)
+                for (let r = minR; r <= M_R; r++) if (r < 10 && M_C + 1 < 10) previewWalls.push({ row: r, col: M_C + 1, side: 'L' });
+                for (let c = minC; c <= M_C; c++) if (M_R + 1 < 10 && c < 10) previewWalls.push({ row: M_R + 1, col: c, side: 'R' });
+                for (let i = 0; i <= steps; i++) if (M_R - i >= 0 && minC + i < 10) previewWalls.push({ row: M_R - i, col: minC + i, side: 'WE' });
+            }
+            else if (dragNE) { // Triângulo base na esquerda (Oeste)
+                for (let r = minR; r <= M_R; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
+                for (let c = minC; c <= M_C; c++) if (M_R + 1 < 10 && c < 10) previewWalls.push({ row: M_R + 1, col: c, side: 'R' });
+                for (let i = 0; i <= steps; i++) if (minR + i < 10 && minC + i < 10) previewWalls.push({ row: minR + i, col: minC + i, side: 'NS' });
+            }
+            else if (dragSW) { // Triângulo base na direita (Leste)
+                for (let r = minR; r <= M_R; r++) if (r < 10 && M_C + 1 < 10) previewWalls.push({ row: r, col: M_C + 1, side: 'L' });
+                for (let c = minC; c <= M_C; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
+                for (let i = 0; i <= steps; i++) if (minR + i < 10 && minC + i < 10) previewWalls.push({ row: minR + i, col: minC + i, side: 'NS' });
             }
         } else if (!isDragging) {
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
@@ -268,33 +279,30 @@ function drawIsometricGrid() {
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            // DESENHO DAS METADES DE PISO
             if (map[row][col].floor > 0) {
                 ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; 
                 ctx.beginPath();
-                if (map[row][col].floor === 1) { // Inteiro
+                if (map[row][col].floor === 1) { 
                     ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (map[row][col].floor === 2) { // Top-Left
+                } else if (map[row][col].floor === 2) { 
                     ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (map[row][col].floor === 3) { // Bottom-Right
+                } else if (map[row][col].floor === 3) { 
                     ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
-                } else if (map[row][col].floor === 4) { // Bottom-Left
+                } else if (map[row][col].floor === 4) { 
                     ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
-                } else if (map[row][col].floor === 5) { // Top-Right
+                } else if (map[row][col].floor === 5) { 
                     ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
                 }
                 ctx.closePath();
                 ctx.fill(); 
             }
             
-            // Contorno do grid (opcional manter a malha inteira)
             ctx.beginPath();
             ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath();
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
-            // FANTASMA DE PREVISÃO DE PISO (Cortado na metade!)
             if (row === hoverRow && col === hoverCol && !isDragging) {
                 const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
                 ctx.beginPath();
@@ -325,10 +333,11 @@ function drawIsometricGrid() {
             if (hL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
             if (hR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
+            // CORREÇÃO: Cutaway de Diagonais blindado para checar o próprio bloco
             let hWE = map[row][col].wallWE;
-            if (isCutaway && row > 0 && map[row - 1][col].floor > 0) hWE = cutawayHeight;
+            if (isCutaway && map[row][col].floor > 0) hWE = cutawayHeight;
             let hNS = map[row][col].wallNS;
-            if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hNS = cutawayHeight;
+            if (isCutaway && map[row][col].floor > 0) hNS = cutawayHeight;
 
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
@@ -347,10 +356,11 @@ function drawIsometricGrid() {
                         if (isCutaway && row > 0 && map[row - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'WE') {
-                        if (isCutaway && row > 0 && map[row - 1].floor > 0) hGhost = cutawayHeight;
+                        // Aplica o cutaway no fantasma também!
+                        if (isCutaway && map[row][col].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'NS') {
-                        if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hGhost = cutawayHeight;
+                        if (isCutaway && map[row][col].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pSul, hGhost, ghostColor);
                     }
                 });
