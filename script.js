@@ -171,7 +171,6 @@ function updatePreview() {
             const dR = hoverRow - start.row;
             const dC = hoverCol - start.col;
 
-            // CORREÇÃO: Alinhamento perfeito da linha diagonal solta
             if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
                 const steps = Math.abs(dR);
                 const rDir = dR > 0 ? 1 : -1;
@@ -230,28 +229,27 @@ function updatePreview() {
             const M_R = minR + steps;
             const M_C = minC + steps;
 
-            // CORREÇÃO: Lê a direção do mouse para saber para onde apontar o triângulo
             const dragSE = hoverRow >= dragStartNode.row && hoverCol >= dragStartNode.col;
             const dragNW = hoverRow < dragStartNode.row && hoverCol < dragStartNode.col;
             const dragNE = hoverRow < dragStartNode.row && hoverCol >= dragStartNode.col;
             const dragSW = hoverRow >= dragStartNode.row && hoverCol < dragStartNode.col;
 
-            if (dragSE) { // Triângulo base em cima (Norte)
+            if (dragSE) { 
                 for (let r = minR; r <= M_R; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
                 for (let c = minC; c <= M_C; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
                 for (let i = 0; i <= steps; i++) if (M_R - i >= 0 && minC + i < 10) previewWalls.push({ row: M_R - i, col: minC + i, side: 'WE' });
             } 
-            else if (dragNW) { // Triângulo base em baixo (Sul)
+            else if (dragNW) { 
                 for (let r = minR; r <= M_R; r++) if (r < 10 && M_C + 1 < 10) previewWalls.push({ row: r, col: M_C + 1, side: 'L' });
                 for (let c = minC; c <= M_C; c++) if (M_R + 1 < 10 && c < 10) previewWalls.push({ row: M_R + 1, col: c, side: 'R' });
                 for (let i = 0; i <= steps; i++) if (M_R - i >= 0 && minC + i < 10) previewWalls.push({ row: M_R - i, col: minC + i, side: 'WE' });
             }
-            else if (dragNE) { // Triângulo base na esquerda (Oeste)
+            else if (dragNE) { 
                 for (let r = minR; r <= M_R; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
                 for (let c = minC; c <= M_C; c++) if (M_R + 1 < 10 && c < 10) previewWalls.push({ row: M_R + 1, col: c, side: 'R' });
                 for (let i = 0; i <= steps; i++) if (minR + i < 10 && minC + i < 10) previewWalls.push({ row: minR + i, col: minC + i, side: 'NS' });
             }
-            else if (dragSW) { // Triângulo base na direita (Leste)
+            else if (dragSW) { 
                 for (let r = minR; r <= M_R; r++) if (r < 10 && M_C + 1 < 10) previewWalls.push({ row: r, col: M_C + 1, side: 'L' });
                 for (let c = minC; c <= M_C; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
                 for (let i = 0; i <= steps; i++) if (minR + i < 10 && minC + i < 10) previewWalls.push({ row: minR + i, col: minC + i, side: 'NS' });
@@ -333,11 +331,12 @@ function drawIsometricGrid() {
             if (hL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
             if (hR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
-            // CORREÇÃO: Cutaway de Diagonais blindado para checar o próprio bloco
+            // CORREÇÃO: Diagonais só abaixam se o chão estiver NA FRENTE delas, e não atrás.
             let hWE = map[row][col].wallWE;
-            if (isCutaway && map[row][col].floor > 0) hWE = cutawayHeight;
+            if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 3) hWE = cutawayHeight;
+            
             let hNS = map[row][col].wallNS;
-            if (isCutaway && map[row][col].floor > 0) hNS = cutawayHeight;
+            if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 5) hNS = cutawayHeight;
 
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
@@ -356,11 +355,10 @@ function drawIsometricGrid() {
                         if (isCutaway && row > 0 && map[row - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'WE') {
-                        // Aplica o cutaway no fantasma também!
-                        if (isCutaway && map[row][col].floor > 0) hGhost = cutawayHeight;
+                        if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 3) hGhost = cutawayHeight;
                         drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'NS') {
-                        if (isCutaway && map[row][col].floor > 0) hGhost = cutawayHeight;
+                        if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 5) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pSul, hGhost, ghostColor);
                     }
                 });
