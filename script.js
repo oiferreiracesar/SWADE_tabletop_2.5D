@@ -323,24 +323,26 @@ function drawIsometricGrid() {
                 ctx.fill();
             }
 
+            // ATUALIZADO: Paredes Cortadas de forma global e direta
             let hL = map[row][col].wallL;
-            if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hL = cutawayHeight;
+            if (isCutaway && hL > 0) hL = cutawayHeight;
+            
             let hR = map[row][col].wallR;
-            if (isCutaway && row > 0 && map[row - 1].floor > 0) hR = cutawayHeight;
+            if (isCutaway && hR > 0) hR = cutawayHeight;
 
             if (hL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
             if (hR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
-            // CORREÇÃO: Diagonais só abaixam se o chão estiver NA FRENTE delas, e não atrás.
             let hWE = map[row][col].wallWE;
-            if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 3) hWE = cutawayHeight;
+            if (isCutaway && hWE > 0) hWE = cutawayHeight;
             
             let hNS = map[row][col].wallNS;
-            if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 5) hNS = cutawayHeight;
+            if (isCutaway && hNS > 0) hNS = cutawayHeight;
 
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
 
+            // Aplicação global do corte também nos fantasmas do mouse
             const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
             if (ghosts.length > 0) {
                 ctx.globalAlpha = 0.7;
@@ -348,17 +350,15 @@ function drawIsometricGrid() {
                 
                 ghosts.forEach(p => {
                     let hGhost = blockHeight;
+                    if (isCutaway) hGhost = cutawayHeight;
+
                     if (p.side === 'L') {
-                        if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
                     } else if (p.side === 'R') {
-                        if (isCutaway && row > 0 && map[row - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'WE') {
-                        if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 3) hGhost = cutawayHeight;
                         drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'NS') {
-                        if (isCutaway && map[row][col].floor !== 0 && map[row][col].floor !== 5) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pSul, hGhost, ghostColor);
                     }
                 });
@@ -404,7 +404,8 @@ function updateUI() {
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
-    document.getElementById('btnCutaway').innerText = isCutaway ? 'Cutaway: LIGADO (C)' : 'Cutaway: DESLIGADO (C)';
+    // ATUALIZADO: Textos alinhados com o novo conceito de corte global
+    document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 }
 
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
