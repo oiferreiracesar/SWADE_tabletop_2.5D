@@ -113,7 +113,6 @@ function getFloorType(r, c, enterDir, hQuad) {
     return 1; 
 }
 
-// NOVO: Função matemática para fundir ou subtrair metades de piso inteligentemente
 function updateFloorState(r, c, incomingType, eraseMode) {
     const current = map[r][c].floor;
     const wWE = map[r][c].wallWE > 0;
@@ -122,14 +121,12 @@ function updateFloorState(r, c, incomingType, eraseMode) {
     if (!eraseMode) {
         if (current === 0) return incomingType;
         if (current === 1) return 1; 
-        // Fusão de lados opostos resulta em um bloco inteiro (1)
         if (wWE && ((current === 2 && incomingType === 3) || (current === 3 && incomingType === 2))) return 1;
         if (wNS && ((current === 4 && incomingType === 5) || (current === 5 && incomingType === 4))) return 1;
         return incomingType; 
     } else {
         if (current === 0) return 0;
         if (current === 1) {
-            // Se o bloco é inteiro, subtrair uma metade deixa a outra viva
             if (wWE) return incomingType === 2 ? 3 : 2;
             if (wNS) return incomingType === 4 ? 5 : 4;
             return 0; 
@@ -151,12 +148,9 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
         const {r, c, type} = queue.shift();
         
         const oldFloor = map[r][c].floor;
-        
-        // ATUALIZADO: Aplica a fusão de metades ao preencher ou apagar
         map[r][c].floor = updateFloorState(r, c, type, paintMode === 0);
         
         if (paintMode === 0 && oldFloor === 0) continue;
-
         if (map[r][c].wallWE > 0 || map[r][c].wallNS > 0) continue;
 
         const canNW = [1, 2, 4].includes(type);
@@ -288,6 +282,41 @@ function updatePreview() {
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'WE' });
         }
     }
+    // NOVA MÁQUINA: Sala Octogonal (5)
+    else if (currentBrush === 5 || (currentEraseMode && currentBrush === 5)) {
+        if (isDragging && dragStartNode && dragStartNode.type === 'room') {
+            const minR = Math.min(dragStartNode.row, hoverRow);
+            const maxR = Math.max(dragStartNode.row, hoverRow);
+            const minC = Math.min(dragStartNode.col, hoverCol);
+            const maxC = Math.max(dragStartNode.col, hoverCol);
+
+            // Exige no mínimo uma área de 2x2 para conseguir cortar os 4 cantos
+            if (maxR - minR >= 1 && maxC - minC >= 1) {
+                // As 4 quinas cortadas pelas diagonais
+                if (minR < 10 && minC < 10) previewWalls.push({ row: minR, col: minC, side: 'WE' }); 
+                if (maxR < 10 && maxC < 10) previewWalls.push({ row: maxR, col: maxC, side: 'WE' }); 
+                if (maxR < 10 && minC < 10) previewWalls.push({ row: maxR, col: minC, side: 'NS' }); 
+                if (minR < 10 && maxC < 10) previewWalls.push({ row: minR, col: maxC, side: 'NS' }); 
+                
+                // Conexões retas das paredes laterais (só são desenhadas se o bloco for 3x3 ou maior)
+                for (let r = minR + 1; r <= maxR - 1; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' }); // Aresta Noroeste
+                for (let r = minR + 1; r <= maxR - 1; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' }); // Aresta Sudeste
+                for (let c = minC + 1; c <= maxC - 1; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' }); // Aresta Nordeste
+                for (let c = minC + 1; c <= maxC - 1; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' }); // Aresta Sudoeste
+            } else {
+                // Fallback de segurança: Se a área for muito pequena (1x1), vira um quadrado.
+                for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
+                for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
+                for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
+                for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
+            }
+        } else if (!isDragging) {
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'R' });
+            if (hoverRow + 1 < 10) previewWalls.push({ row: hoverRow + 1, col: hoverCol, side: 'R' });
+            if (hoverCol + 1 < 10) previewWalls.push({ row: hoverRow, col: hoverCol + 1, side: 'L' });
+        }
+    }
 }
 
 function drawIsometricGrid() {
@@ -401,7 +430,6 @@ function applySmartBrush() {
 
     if (currentBrush === 1) { 
         const type = getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant);
-        // ATUALIZADO: Aplica a fusão de metades ao pintar um quadro manualmente
         map[hoverRow][hoverCol].floor = updateFloorState(hoverRow, hoverCol, type, currentEraseMode); 
         return; 
     }
@@ -432,6 +460,8 @@ function updateUI() {
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
+    // ATUALIZADO: Ferramenta 5 ativa na interface
+    document.getElementById('btnRoomOct').classList.toggle('active', currentBrush === 5 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 }
@@ -505,7 +535,8 @@ canvas.addEventListener('mousedown', (e) => {
     if (currentBrush === 1) {
         dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
-    } else if (currentBrush === 3 || currentBrush === 4) {
+    // ATUALIZADO: Ferramenta 5 aciona a lógica de arrasto de cômodos
+    } else if ([3, 4, 5].includes(currentBrush)) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
@@ -523,7 +554,8 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         const eraseMode = dragStartNode.erase;
-        if ([2, 3, 4].includes(currentBrush) && !eraseMode) {
+        // ATUALIZADO: Salva paredes geradas pela ferramenta 5
+        if ([2, 3, 4, 5].includes(currentBrush) && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
@@ -598,7 +630,8 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2','3','4'].includes(e.key)) {
+    // ATUALIZADO: Tecla 5 ativa a nova ferramenta
+    if (['1','2','3','4','5'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
@@ -621,6 +654,9 @@ document.getElementById('btnPiso').addEventListener('click', () => { currentBrus
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
+// ATUALIZADO: Clique no novo botão HTML
+document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
+
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
     const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
