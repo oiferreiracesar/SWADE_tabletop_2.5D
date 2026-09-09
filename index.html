@@ -12,11 +12,18 @@
         <div class="tool-section">
             <h3>Ferramentas Básicas</h3>
             <button id="btnPiso" class="tool-btn active">Piso (1)</button>
-            <button id="btnParede" class="tool-btn">Parede (2)</button>
+            <button id="btnParede" class="tool-btn">Parede Simples (2)</button>
             <button id="btnBorracha" class="tool-btn">Borracha (Segure Ctrl)</button>
         </div>
 
-        <!-- NOVA SEÇÃO: Controle de Altura -->
+        <!-- NOVA SEÇÃO: Cômodos Prontos -->
+        <div class="tool-section">
+            <h3>Cômodos Prontos</h3>
+            <button id="btnRoomRect" class="tool-btn">Sala Retangular (3)</button>
+            <button id="btnRoomTri" class="tool-btn" style="opacity: 0.4; cursor: not-allowed;" title="Requer reestruturação de motor (Próxima etapa)">Sala Triangular</button>
+            <button id="btnRoomOct" class="tool-btn" style="opacity: 0.4; cursor: not-allowed;" title="Requer reestruturação de motor (Próxima etapa)">Sala Octogonal</button>
+        </div>
+
         <div class="tool-section">
             <h3>Altura da Parede: <span id="valorAltura">48</span>px</h3>
             <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">

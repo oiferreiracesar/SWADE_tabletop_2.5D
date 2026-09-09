@@ -8,7 +8,6 @@ const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
 
-// Agora essa variável serve apenas para ditar a altura da PRÓXIMA parede
 let blockHeight = 48; 
 const cutawayHeight = 12; 
 
@@ -28,7 +27,6 @@ const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = [];
     for (let j = 0; j < 10; j++) {
-        // wallL e wallR agora guardam a ALTURA da parede (0 = sem parede)
         map[i][j] = { floor: 0, wallL: 0, wallR: 0 }; 
     }
 }
@@ -115,13 +113,15 @@ function floodFillFloor(startRow, startCol, paintMode) {
     }
 }
 
+// ATUALIZADO: Cálculo geométrico para a Sala Retangular (Ferramenta 3)
 function updatePreview() {
     previewWalls = [];
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    if (currentBrush === 2 || currentEraseMode) { 
+    // Lógica da Parede Linha (2)
+    if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) {
             if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
@@ -138,6 +138,31 @@ function updatePreview() {
             } else if (!isDragging) {
                 previewWalls.push(edge);
             }
+        }
+    } 
+    // Lógica da Sala Retangular (3)
+    else if (currentBrush === 3 || (currentEraseMode && currentBrush === 3)) {
+        if (isDragging && dragStartNode && dragStartNode.type === 'room') {
+            const minR = Math.min(dragStartNode.row, hoverRow);
+            const maxR = Math.max(dragStartNode.row, hoverRow);
+            const minC = Math.min(dragStartNode.col, hoverCol);
+            const maxC = Math.max(dragStartNode.col, hoverCol);
+
+            // Perímetro Noroeste
+            for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'L' });
+            // Perímetro Nordeste
+            for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'R' });
+            // Perímetro Sudoeste
+            for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
+            // Perímetro Sudeste
+            for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
+
+        } else if (!isDragging) {
+            // Hover simples mostra um quadrado ao redor da célula atual
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'R' });
+            if (hoverRow + 1 < 10) previewWalls.push({ row: hoverRow + 1, col: hoverCol, side: 'R' });
+            if (hoverCol + 1 < 10) previewWalls.push({ row: hoverRow, col: hoverCol + 1, side: 'L' });
         }
     }
 }
@@ -179,7 +204,6 @@ function drawIsometricGrid() {
                 ctx.fill();
             }
 
-            // ATUALIZADO: Lê a altura individual registrada no mapa
             let hL = map[row][col].wallL;
             if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hL = cutawayHeight;
             
@@ -192,7 +216,6 @@ function drawIsometricGrid() {
             const pL = previewWalls.find(p => p.row === row && p.col === col && p.side === 'L');
             const pR = previewWalls.find(p => p.row === row && p.col === col && p.side === 'R');
 
-            // Renderiza o fantasma da parede (usa o blockHeight do slider atual)
             if (pL || pR) {
                 ctx.globalAlpha = 0.7;
                 const ghostColor = currentEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
@@ -204,7 +227,7 @@ function drawIsometricGrid() {
                 }
                 if (pR) {
                     let hGhost = blockHeight;
-                    if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hGhost = cutawayHeight;
+                    if (isCutaway && row > 0 && map[row - 1].floor === 1) hGhost = cutawayHeight;
                     drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                 }
                 ctx.globalAlpha = 1.0;
@@ -234,13 +257,13 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
-    if (tRow < 10 && tCol < 10 && !isDragging) {
+    // Aplicação para linha simples (brush 2) se não estiver arrastando
+    if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
         if (currentEraseMode) {
             if (side === 'L') map[tRow][tCol].wallL = 0;
             if (side === 'R') map[tRow][tCol].wallR = 0;
             map[hoverRow][hoverCol].floor = 0; 
-        } else if (currentBrush === 2) {
-            // ATUALIZADO: Salva a altura do slider em vez de apenas "1"
+        } else {
             if (side === 'L') map[tRow][tCol].wallL = blockHeight;
             if (side === 'R') map[tRow][tCol].wallR = blockHeight;
         }
@@ -250,11 +273,11 @@ function applySmartBrush() {
 function updateUI() {
     document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
+    document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Cutaway: LIGADO (C)' : 'Cutaway: DESLIGADO (C)';
 }
 
-// LIGAÇÃO DO SLIDER DE ALTURA DA PAREDE
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
     blockHeight = parseInt(e.target.value);
     document.getElementById('valorAltura').innerText = blockHeight;
@@ -324,6 +347,9 @@ canvas.addEventListener('mousedown', (e) => {
     if (currentBrush === 1) {
         dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
+    } else if (currentBrush === 3) {
+        // Inicia arrasto de Sala Retangular
+        dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
@@ -340,14 +366,14 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         const eraseMode = dragStartNode.erase;
-        if (currentBrush === 2 && !eraseMode) {
+        // Salva paredes em lote se for Sala Retangular (3) ou Parede Linha (2)
+        if ((currentBrush === 2 || currentBrush === 3) && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
-                // ATUALIZADO: Salva a altura do slider no arrastar e soltar
                 if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
                 else map[p.row][p.col].wallR = blockHeight;
             });
-        } else if (eraseMode && dragStartNode && dragStartNode.type === 'wall') {
+        } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
             saveState();
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 0;
@@ -410,7 +436,7 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2'].includes(e.key)) {
+    if (['1','2','3'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
@@ -431,6 +457,7 @@ window.addEventListener('keyup', (e) => {
 
 document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
+document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
     const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
