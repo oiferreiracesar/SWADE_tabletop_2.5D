@@ -113,12 +113,36 @@ function getFloorType(r, c, enterDir, hQuad) {
     return 1; 
 }
 
+// NOVO: Função matemática para fundir ou subtrair metades de piso inteligentemente
+function updateFloorState(r, c, incomingType, eraseMode) {
+    const current = map[r][c].floor;
+    const wWE = map[r][c].wallWE > 0;
+    const wNS = map[r][c].wallNS > 0;
+
+    if (!eraseMode) {
+        if (current === 0) return incomingType;
+        if (current === 1) return 1; 
+        // Fusão de lados opostos resulta em um bloco inteiro (1)
+        if (wWE && ((current === 2 && incomingType === 3) || (current === 3 && incomingType === 2))) return 1;
+        if (wNS && ((current === 4 && incomingType === 5) || (current === 5 && incomingType === 4))) return 1;
+        return incomingType; 
+    } else {
+        if (current === 0) return 0;
+        if (current === 1) {
+            // Se o bloco é inteiro, subtrair uma metade deixa a outra viva
+            if (wWE) return incomingType === 2 ? 3 : 2;
+            if (wNS) return incomingType === 4 ? 5 : 4;
+            return 0; 
+        }
+        if (current === incomingType) return 0; 
+        return current; 
+    }
+}
+
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     
-    let startType = 1;
-    if (paintMode === 1) startType = getFloorType(startRow, startCol, 'CLICK', startQuad);
-    
+    const startType = getFloorType(startRow, startCol, 'CLICK', startQuad);
     const queue = [{r: startRow, c: startCol, type: startType}];
     const visited = new Set();
     visited.add(`${startRow},${startCol}`);
@@ -126,15 +150,19 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     while(queue.length > 0) {
         const {r, c, type} = queue.shift();
         
-        const spreadType = paintMode === 1 ? type : map[r][c].floor;
-        map[r][c].floor = paintMode === 1 ? type : 0;
+        const oldFloor = map[r][c].floor;
         
-        if (paintMode === 0 && spreadType === 0) continue;
+        // ATUALIZADO: Aplica a fusão de metades ao preencher ou apagar
+        map[r][c].floor = updateFloorState(r, c, type, paintMode === 0);
+        
+        if (paintMode === 0 && oldFloor === 0) continue;
 
-        const canNW = [1, 2, 4].includes(spreadType);
-        const canNE = [1, 2, 5].includes(spreadType);
-        const canSW = [1, 3, 4].includes(spreadType);
-        const canSE = [1, 3, 5].includes(spreadType);
+        if (map[r][c].wallWE > 0 || map[r][c].wallNS > 0) continue;
+
+        const canNW = [1, 2, 4].includes(type);
+        const canNE = [1, 2, 5].includes(type);
+        const canSW = [1, 3, 4].includes(type);
+        const canSE = [1, 3, 5].includes(type);
 
         if (canNW && c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
             const nextType = getFloorType(r, c-1, 'SE');
@@ -323,7 +351,6 @@ function drawIsometricGrid() {
                 ctx.fill();
             }
 
-            // ATUALIZADO: Paredes Cortadas de forma global e direta
             let hL = map[row][col].wallL;
             if (isCutaway && hL > 0) hL = cutawayHeight;
             
@@ -342,7 +369,6 @@ function drawIsometricGrid() {
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
 
-            // Aplicação global do corte também nos fantasmas do mouse
             const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
             if (ghosts.length > 0) {
                 ctx.globalAlpha = 0.7;
@@ -374,11 +400,14 @@ function applySmartBrush() {
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 1) { 
-        map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant); 
+        const type = getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant);
+        // ATUALIZADO: Aplica a fusão de metades ao pintar um quadro manualmente
+        map[hoverRow][hoverCol].floor = updateFloorState(hoverRow, hoverCol, type, currentEraseMode); 
         return; 
     }
     if (currentEraseMode && isDragging && dragStartNode && dragStartNode.type === 'floor') {
-        map[hoverRow][hoverCol].floor = 0;
+        const type = getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant);
+        map[hoverRow][hoverCol].floor = updateFloorState(hoverRow, hoverCol, type, true);
         return;
     }
 
@@ -404,7 +433,6 @@ function updateUI() {
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
-    // ATUALIZADO: Textos alinhados com o novo conceito de corte global
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 }
 
