@@ -90,33 +90,74 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-function floodFillFloor(startRow, startCol, paintMode) {
+// NOVO: Lê as paredes diagonais para decidir se o piso será inteiro ou fatiado na metade
+function getFloorType(r, c, enterDir, hQuad) {
+    const wWE = map[r][c].wallWE > 0;
+    const wNS = map[r][c].wallNS > 0;
+    
+    if (wWE) {
+        if (enterDir === 'NW' || enterDir === 'NE') return 2; // Metade Cima-Esquerda
+        if (enterDir === 'SW' || enterDir === 'SE') return 3; // Metade Baixo-Direita
+        if (enterDir === 'CLICK') {
+            if (hQuad === 'NW' || hQuad === 'NE') return 2;
+            if (hQuad === 'SW' || hQuad === 'SE') return 3;
+        }
+    }
+    if (wNS) {
+        if (enterDir === 'NW' || enterDir === 'SW') return 4; // Metade Baixo-Esquerda
+        if (enterDir === 'NE' || enterDir === 'SE') return 5; // Metade Cima-Direita
+        if (enterDir === 'CLICK') {
+            if (hQuad === 'NW' || hQuad === 'SW') return 4;
+            if (hQuad === 'NE' || hQuad === 'SE') return 5;
+        }
+    }
+    return 1; // Piso Inteiro
+}
+
+// ATUALIZADO: O Flood Fill agora se espalha usando a física dos "Meios-Pisos"
+function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
-    const queue = [{r: startRow, c: startCol}];
+    
+    let startType = 1;
+    if (paintMode === 1) startType = getFloorType(startRow, startCol, 'CLICK', startQuad);
+    
+    const queue = [{r: startRow, c: startCol, type: startType}];
     const visited = new Set();
     visited.add(`${startRow},${startCol}`);
 
     while(queue.length > 0) {
-        const {r, c} = queue.shift();
-        map[r][c].floor = paintMode;
+        const {r, c, type} = queue.shift();
+        
+        const spreadType = paintMode === 1 ? type : map[r][c].floor;
+        map[r][c].floor = paintMode === 1 ? type : 0;
+        
+        if (paintMode === 0 && spreadType === 0) continue;
 
-        if (map[r][c].wallWE > 0 || map[r][c].wallNS > 0) continue;
+        // Regras restritas: Metades de piso só se espalham pelos lados que estão abertos
+        const canNW = [1, 2, 4].includes(spreadType);
+        const canNE = [1, 2, 5].includes(spreadType);
+        const canSW = [1, 3, 4].includes(spreadType);
+        const canSE = [1, 3, 5].includes(spreadType);
 
-        if (c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
+        if (canNW && c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
+            const nextType = getFloorType(r, c-1, 'SE');
             visited.add(`${r},${c-1}`);
-            queue.push({r: r, c: c-1});
+            queue.push({r, c: c-1, type: nextType});
         }
-        if (c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
+        if (canSE && c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
+            const nextType = getFloorType(r, c+1, 'NW');
             visited.add(`${r},${c+1}`);
-            queue.push({r: r, c: c+1});
+            queue.push({r, c: c+1, type: nextType});
         }
-        if (r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
+        if (canNE && r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
+            const nextType = getFloorType(r-1, c, 'SW');
             visited.add(`${r-1},${c}`);
-            queue.push({r: r-1, c: c});
+            queue.push({r: r-1, c, type: nextType});
         }
-        if (r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
+        if (canSW && r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
+            const nextType = getFloorType(r+1, c, 'NE');
             visited.add(`${r+1},${c}`);
-            queue.push({r: r+1, c: c});
+            queue.push({r: r+1, c, type: nextType});
         }
     }
 }
@@ -134,7 +175,6 @@ function updatePreview() {
             const dC = hoverCol - start.col;
 
             if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
-                // CORREÇÃO: Alinhamento perfeito da linha diagonal
                 const steps = Math.abs(dR);
                 const rDir = dR > 0 ? 1 : -1;
                 const cDir = dC > 0 ? 1 : -1;
@@ -192,7 +232,6 @@ function updatePreview() {
             const dC = maxC - minC;
 
             if (dR === dC && dR > 0) {
-                // CORREÇÃO: Laços arrumados para o Triângulo formar o canto superior corretamente
                 for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
                 for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
                 for (let i = 0; i <= dR; i++) {
@@ -201,7 +240,6 @@ function updatePreview() {
                     if (r >= 0 && r < 10 && c >= 0 && c < 10) previewWalls.push({ row: r, col: c, side: 'WE' });
                 }
             } else {
-                // CORREÇÃO: O Fallback agora desenha o retângulo sem ziguezague
                 for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
                 for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
                 for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
@@ -230,22 +268,49 @@ function drawIsometricGrid() {
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            ctx.beginPath();
-            ctx.moveTo(pNorte.x, pNorte.y);
-            ctx.lineTo(pLeste.x, pLeste.y);
-            ctx.lineTo(pSul.x, pSul.y);
-            ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
-            
-            if (map[row][col].floor === 1) { 
+            // DESENHO DAS METADES DE PISO
+            if (map[row][col].floor > 0) {
                 ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; 
+                ctx.beginPath();
+                if (map[row][col].floor === 1) { // Inteiro
+                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+                } else if (map[row][col].floor === 2) { // Top-Left
+                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
+                } else if (map[row][col].floor === 3) { // Bottom-Right
+                    ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
+                } else if (map[row][col].floor === 4) { // Bottom-Left
+                    ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
+                } else if (map[row][col].floor === 5) { // Top-Right
+                    ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
+                }
+                ctx.closePath();
                 ctx.fill(); 
             }
+            
+            // Contorno do grid (opcional manter a malha inteira)
+            ctx.beginPath();
+            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.closePath();
             ctx.strokeStyle = '#555'; 
             ctx.stroke();
 
+            // FANTASMA DE PREVISÃO DE PISO (Cortado na metade!)
             if (row === hoverRow && col === hoverCol && !isDragging) {
-                defineTilePath(pNorte, pLeste, pSul, pOeste);
+                const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
+                ctx.beginPath();
+                if (previewType === 1) { 
+                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+                } else if (previewType === 2) { 
+                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
+                } else if (previewType === 3) { 
+                    ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
+                } else if (previewType === 4) { 
+                    ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
+                } else if (previewType === 5) { 
+                    ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
+                }
+                ctx.closePath();
+                
                 if (currentEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
                 else if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
                 else ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
@@ -253,17 +318,17 @@ function drawIsometricGrid() {
             }
 
             let hL = map[row][col].wallL;
-            if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hL = cutawayHeight;
+            if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hL = cutawayHeight;
             let hR = map[row][col].wallR;
-            if (isCutaway && row > 0 && map[row - 1].floor === 1) hR = cutawayHeight;
+            if (isCutaway && row > 0 && map[row - 1].floor > 0) hR = cutawayHeight;
 
             if (hL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
             if (hR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
             let hWE = map[row][col].wallWE;
-            if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hWE = cutawayHeight;
+            if (isCutaway && row > 0 && map[row - 1][col].floor > 0) hWE = cutawayHeight;
             let hNS = map[row][col].wallNS;
-            if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hNS = cutawayHeight;
+            if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hNS = cutawayHeight;
 
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
@@ -276,16 +341,16 @@ function drawIsometricGrid() {
                 ghosts.forEach(p => {
                     let hGhost = blockHeight;
                     if (p.side === 'L') {
-                        if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hGhost = cutawayHeight;
+                        if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
                     } else if (p.side === 'R') {
-                        if (isCutaway && row > 0 && map[row - 1].floor === 1) hGhost = cutawayHeight;
+                        if (isCutaway && row > 0 && map[row - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'WE') {
-                        if (isCutaway && row > 0 && map[row - 1].floor === 1) hGhost = cutawayHeight;
+                        if (isCutaway && row > 0 && map[row - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
                     } else if (p.side === 'NS') {
-                        if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hGhost = cutawayHeight;
+                        if (isCutaway && col > 0 && map[row][col - 1].floor > 0) hGhost = cutawayHeight;
                         drawFlatWall(pNorte, pSul, hGhost, ghostColor);
                     }
                 });
@@ -301,7 +366,7 @@ function applySmartBrush() {
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 1) { 
-        map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : 1; 
+        map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant); 
         return; 
     }
     if (currentEraseMode && isDragging && dragStartNode && dragStartNode.type === 'floor') {
@@ -318,7 +383,6 @@ function applySmartBrush() {
         if (currentEraseMode) {
             if (side === 'L') map[tRow][tCol].wallL = 0;
             if (side === 'R') map[tRow][tCol].wallR = 0;
-            map[hoverRow][hoverCol].floor = 0; 
         } else {
             if (side === 'L') map[tRow][tCol].wallL = blockHeight;
             if (side === 'R') map[tRow][tCol].wallR = blockHeight;
@@ -394,7 +458,7 @@ canvas.addEventListener('mousedown', (e) => {
     saveState(); 
 
     if (e.shiftKey) {
-        floodFillFloor(hoverRow, hoverCol, isErasing ? 0 : 1);
+        floodFillFloor(hoverRow, hoverCol, isErasing ? 0 : 1, hoverQuadrant);
         drawIsometricGrid();
         return; 
     }
