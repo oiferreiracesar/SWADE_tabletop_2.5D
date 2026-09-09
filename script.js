@@ -27,7 +27,8 @@ const map = [];
 for (let i = 0; i < 10; i++) {
     map[i] = [];
     for (let j = 0; j < 10; j++) {
-        map[i][j] = { floor: 0, wallL: 0, wallR: 0 }; 
+        // ATUALIZADO: Novas arestas diagonais WE (Oeste-Leste) e NS (Norte-Sul)
+        map[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0 }; 
     }
 }
 
@@ -38,7 +39,13 @@ function saveState() {
     for (let i = 0; i < 10; i++) {
         snapshot[i] = [];
         for (let j = 0; j < 10; j++) {
-            snapshot[i][j] = { floor: map[i][j].floor, wallL: map[i][j].wallL, wallR: map[i][j].wallR };
+            snapshot[i][j] = { 
+                floor: map[i][j].floor, 
+                wallL: map[i][j].wallL, 
+                wallR: map[i][j].wallR,
+                wallWE: map[i][j].wallWE,
+                wallNS: map[i][j].wallNS
+            };
         }
     }
     mapHistory.push(snapshot);
@@ -94,6 +101,9 @@ function floodFillFloor(startRow, startCol, paintMode) {
         const {r, c} = queue.shift();
         map[r][c].floor = paintMode;
 
+        // TRAVA DE SEGURANÇA: Diagonais bloqueiam o avanço da tinta para não vazar
+        if (map[r][c].wallWE > 0 || map[r][c].wallNS > 0) continue;
+
         if (c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
             visited.add(`${r},${c-1}`);
             queue.push({r: r, c: c-1});
@@ -113,32 +123,49 @@ function floodFillFloor(startRow, startCol, paintMode) {
     }
 }
 
-// CORREÇÃO: Cálculos rigorosos do perímetro para a ferramenta 3
 function updatePreview() {
     previewWalls = [];
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
+    // Lógica da Parede Flex (2) - Desenha Reto OU Diagonal dependendo do mouse
     if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
-        const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-        if (edge) {
-            if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
-                const start = dragStartNode;
-                if (start.side === 'L') {
-                    const minR = Math.min(start.row, edge.row);
-                    const maxR = Math.max(start.row, edge.row);
-                    for (let r = minR; r <= maxR; r++) previewWalls.push({ row: r, col: start.col, side: 'L' });
-                } else {
-                    const minC = Math.min(start.col, edge.col);
-                    const maxC = Math.max(start.col, edge.col);
-                    for (let c = minC; c <= maxC; c++) previewWalls.push({ row: start.row, col: c, side: 'R' });
+        if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
+            const start = dragStartNode;
+            const dR = hoverRow - start.row;
+            const dC = hoverCol - start.col;
+
+            // Detecta se o arraste forma uma diagonal perfeita (ex: +2, +2)
+            if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
+                const steps = Math.abs(dR);
+                const rDir = dR > 0 ? 1 : -1;
+                const cDir = dC > 0 ? 1 : -1;
+                for (let i = 0; i <= steps; i++) {
+                    const r = start.row + (i * rDir);
+                    const c = start.col + (i * cDir);
+                    if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+                        if (rDir === cDir) previewWalls.push({ row: r, col: c, side: 'NS' });
+                        else previewWalls.push({ row: r, col: c, side: 'WE' });
+                    }
                 }
-            } else if (!isDragging) {
-                previewWalls.push(edge);
+            } 
+            // Se não for diagonal perfeita, trava em reta (horizontal ou vertical)
+            else if (Math.abs(dR) >= Math.abs(dC)) {
+                const minR = Math.min(start.row, hoverRow);
+                const maxR = Math.max(start.row, hoverRow);
+                for (let r = minR; r <= maxR; r++) if (r < 10) previewWalls.push({ row: r, col: start.col, side: 'L' });
+            } else {
+                const minC = Math.min(start.col, hoverCol);
+                const maxC = Math.max(start.col, hoverCol);
+                for (let c = minC; c <= maxC; c++) if (c < 10) previewWalls.push({ row: start.row, col: c, side: 'R' });
             }
+        } else if (!isDragging) {
+            const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
+            if (edge) previewWalls.push(edge);
         }
     } 
+    // Lógica da Sala Retangular (3)
     else if (currentBrush === 3 || (currentEraseMode && currentBrush === 3)) {
         if (isDragging && dragStartNode && dragStartNode.type === 'room') {
             const minR = Math.min(dragStartNode.row, hoverRow);
@@ -146,27 +173,48 @@ function updatePreview() {
             const minC = Math.min(dragStartNode.col, hoverCol);
             const maxC = Math.max(dragStartNode.col, hoverCol);
 
-            // 1. Parede Noroeste (Linha descendo para a esquerda)
-            for (let r = minR; r <= maxR; r++) {
-                if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
-            }
-            // 2. Parede Nordeste (Linha descendo para a direita)
-            for (let c = minC; c <= maxC; c++) {
-                if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
-            }
-            // 3. Parede Sudoeste (Linha descendo para a direita, embaixo)
-            for (let c = minC; c <= maxC; c++) {
-                if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
-            }
-            // 4. Parede Sudeste (Linha descendo para a esquerda, na direita)
-            for (let r = minR; r <= maxR; r++) {
-                if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
-            }
+            for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'L' });
+            for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'R' });
+            for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
+            for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
         } else if (!isDragging) {
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'R' });
             if (hoverRow + 1 < 10) previewWalls.push({ row: hoverRow + 1, col: hoverCol, side: 'R' });
             if (hoverCol + 1 < 10) previewWalls.push({ row: hoverRow, col: hoverCol + 1, side: 'L' });
+        }
+    }
+    // NOVA: Lógica da Sala Triangular (4)
+    else if (currentBrush === 4 || (currentEraseMode && currentBrush === 4)) {
+        if (isDragging && dragStartNode && dragStartNode.type === 'room') {
+            const minR = Math.min(dragStartNode.row, hoverRow);
+            const maxR = Math.max(dragStartNode.row, hoverRow);
+            const minC = Math.min(dragStartNode.col, hoverCol);
+            const maxC = Math.max(dragStartNode.col, hoverCol);
+            const dR = maxR - minR;
+            const dC = maxC - minC;
+
+            // Só desenha triângulo se a caixa formada for perfeitamente quadrada
+            if (dR === dC && dR > 0) {
+                for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
+                for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
+                // Hipotenusa
+                for (let i = 0; i <= dR; i++) {
+                    const r = maxR - i;
+                    const c = minC + i;
+                    if (r >= 0 && r < 10 && c >= 0 && c < 10) previewWalls.push({ row: r, col: c, side: 'WE' });
+                }
+            } else {
+                // Fallback de UI para caso o usuário não consiga puxar o quadrado perfeito
+                for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'L' });
+                for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'R' });
+                for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
+                for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
+            }
+        } else if (!isDragging) {
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'R' });
+            previewWalls.push({ row: hoverRow, col: hoverCol, side: 'WE' });
         }
     }
 }
@@ -208,32 +256,46 @@ function drawIsometricGrid() {
                 ctx.fill();
             }
 
+            // Renderiza as paredes de trás
             let hL = map[row][col].wallL;
             if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hL = cutawayHeight;
-            
             let hR = map[row][col].wallR;
             if (isCutaway && row > 0 && map[row - 1].floor === 1) hR = cutawayHeight;
 
-            if (map[row][col].wallL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
-            if (map[row][col].wallR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
+            if (hL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
+            if (hR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
 
-            const pL = previewWalls.find(p => p.row === row && p.col === col && p.side === 'L');
-            const pR = previewWalls.find(p => p.row === row && p.col === col && p.side === 'R');
+            // Renderiza Diagonais (Após paredes traseiras da mesma célula)
+            let hWE = map[row][col].wallWE;
+            if (isCutaway && row > 0 && map[row - 1][col].floor === 1) hWE = cutawayHeight;
+            let hNS = map[row][col].wallNS;
+            if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hNS = cutawayHeight;
 
-            if (pL || pR) {
+            if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
+            if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
+
+            // FANTASMAS DA PRÉVIA
+            const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
+            if (ghosts.length > 0) {
                 ctx.globalAlpha = 0.7;
                 const ghostColor = currentEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
                 
-                if (pL) {
+                ghosts.forEach(p => {
                     let hGhost = blockHeight;
-                    if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hGhost = cutawayHeight;
-                    drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
-                }
-                if (pR) {
-                    let hGhost = blockHeight;
-                    if (isCutaway && row > 0 && map[row - 1].floor === 1) hGhost = cutawayHeight;
-                    drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
-                }
+                    if (p.side === 'L') {
+                        if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hGhost = cutawayHeight;
+                        drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
+                    } else if (p.side === 'R') {
+                        if (isCutaway && row > 0 && map[row - 1].floor === 1) hGhost = cutawayHeight;
+                        drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
+                    } else if (p.side === 'WE') {
+                        if (isCutaway && row > 0 && map[row - 1].floor === 1) hGhost = cutawayHeight;
+                        drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
+                    } else if (p.side === 'NS') {
+                        if (isCutaway && col > 0 && map[row][col - 1].floor === 1) hGhost = cutawayHeight;
+                        drawFlatWall(pNorte, pSul, hGhost, ghostColor);
+                    }
+                });
                 ctx.globalAlpha = 1.0;
             }
         }
@@ -243,14 +305,12 @@ function drawIsometricGrid() {
 
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
-    
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 1) { 
         map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : 1; 
         return; 
     }
-    
     if (currentEraseMode && isDragging && dragStartNode && dragStartNode.type === 'floor') {
         map[hoverRow][hoverCol].floor = 0;
         return;
@@ -277,6 +337,7 @@ function updateUI() {
     document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
+    document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Cutaway: LIGADO (C)' : 'Cutaway: DESLIGADO (C)';
 }
@@ -350,7 +411,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (currentBrush === 1) {
         dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
-    } else if (currentBrush === 3) {
+    } else if (currentBrush === 3 || currentBrush === 4) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
@@ -368,17 +429,21 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         const eraseMode = dragStartNode.erase;
-        if ((currentBrush === 2 || currentBrush === 3) && !eraseMode) {
+        if ([2, 3, 4].includes(currentBrush) && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
-                else map[p.row][p.col].wallR = blockHeight;
+                else if (p.side === 'R') map[p.row][p.col].wallR = blockHeight;
+                else if (p.side === 'WE') map[p.row][p.col].wallWE = blockHeight;
+                else if (p.side === 'NS') map[p.row][p.col].wallNS = blockHeight;
             });
         } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
             saveState();
             previewWalls.forEach(p => {
                 if (p.side === 'L') map[p.row][p.col].wallL = 0;
-                else map[p.row][p.col].wallR = 0;
+                else if (p.side === 'R') map[p.row][p.col].wallR = 0;
+                else if (p.side === 'WE') map[p.row][p.col].wallWE = 0;
+                else if (p.side === 'NS') map[p.row][p.col].wallNS = 0;
             });
         }
     }
@@ -430,6 +495,8 @@ window.addEventListener('keydown', (e) => {
                     map[r][c].floor = previousState[r][c].floor;
                     map[r][c].wallL = previousState[r][c].wallL;
                     map[r][c].wallR = previousState[r][c].wallR;
+                    map[r][c].wallWE = previousState[r][c].wallWE;
+                    map[r][c].wallNS = previousState[r][c].wallNS;
                 }
             }
             drawIsometricGrid();
@@ -437,7 +504,7 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2','3'].includes(e.key)) {
+    if (['1','2','3','4'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
@@ -459,6 +526,7 @@ window.addEventListener('keyup', (e) => {
 document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
+document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
     const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
