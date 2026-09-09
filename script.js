@@ -113,14 +113,13 @@ function floodFillFloor(startRow, startCol, paintMode) {
     }
 }
 
-// ATUALIZADO: Cálculo geométrico para a Sala Retangular (Ferramenta 3)
+// CORREÇÃO: Cálculos rigorosos do perímetro para a ferramenta 3
 function updatePreview() {
     previewWalls = [];
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // Lógica da Parede Linha (2)
     if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) {
@@ -140,7 +139,6 @@ function updatePreview() {
             }
         }
     } 
-    // Lógica da Sala Retangular (3)
     else if (currentBrush === 3 || (currentEraseMode && currentBrush === 3)) {
         if (isDragging && dragStartNode && dragStartNode.type === 'room') {
             const minR = Math.min(dragStartNode.row, hoverRow);
@@ -148,17 +146,23 @@ function updatePreview() {
             const minC = Math.min(dragStartNode.col, hoverCol);
             const maxC = Math.max(dragStartNode.col, hoverCol);
 
-            // Perímetro Noroeste
-            for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'L' });
-            // Perímetro Nordeste
-            for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'R' });
-            // Perímetro Sudoeste
-            for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
-            // Perímetro Sudeste
-            for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
-
+            // 1. Parede Noroeste (Linha descendo para a esquerda)
+            for (let r = minR; r <= maxR; r++) {
+                if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
+            }
+            // 2. Parede Nordeste (Linha descendo para a direita)
+            for (let c = minC; c <= maxC; c++) {
+                if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
+            }
+            // 3. Parede Sudoeste (Linha descendo para a direita, embaixo)
+            for (let c = minC; c <= maxC; c++) {
+                if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
+            }
+            // 4. Parede Sudeste (Linha descendo para a esquerda, na direita)
+            for (let r = minR; r <= maxR; r++) {
+                if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
+            }
         } else if (!isDragging) {
-            // Hover simples mostra um quadrado ao redor da célula atual
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'R' });
             if (hoverRow + 1 < 10) previewWalls.push({ row: hoverRow + 1, col: hoverCol, side: 'R' });
@@ -257,7 +261,6 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
-    // Aplicação para linha simples (brush 2) se não estiver arrastando
     if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
         if (currentEraseMode) {
             if (side === 'L') map[tRow][tCol].wallL = 0;
@@ -348,7 +351,6 @@ canvas.addEventListener('mousedown', (e) => {
         dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
     } else if (currentBrush === 3) {
-        // Inicia arrasto de Sala Retangular
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
@@ -366,7 +368,6 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         const eraseMode = dragStartNode.erase;
-        // Salva paredes em lote se for Sala Retangular (3) ou Parede Linha (2)
         if ((currentBrush === 2 || currentBrush === 3) && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
