@@ -432,7 +432,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
     
-    // ATUALIZADO: A grade cinza pertence única e exclusivamente ao andar ativo.
     let shouldDrawGrid = false;
 
     if (fIndex === currentFloor) {
@@ -442,6 +441,13 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             const supp = isFloorSupported(row, col);
             shouldDrawGrid = hasContent || supp; 
         }
+    }
+
+    // A REGRA DE OURO QUE VOCÊ PEDIU:
+    // Se Paredes Inteiras estiver ativado (!isCutaway), ocultamos o grid de TODOS os andares.
+    // Isso garante a "parede lisa" perfeita e limpa a poluição visual completamente.
+    if (!isCutaway) {
+        shouldDrawGrid = false;
     }
 
     if (targetMap[row][col].floor > 0) {
@@ -470,7 +476,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.stroke();
     }
 
-    if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+    // Oculta os cursores verdes e vermelhos no modo Visualização (Paredes Inteiras) para não quebrar a imersão
+    if (showActiveTools && isCutaway && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
         const supp = isFloorSupported(row, col);
         const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
         ctx.beginPath();
@@ -533,7 +540,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+    if (showActiveTools && isCutaway && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
         if (applyCutaway) colH = cutawayHeight;
@@ -549,7 +556,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools) {
+    if (showActiveTools && isCutaway) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -604,6 +611,9 @@ function drawIsometricGrid() {
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
+
+    // Se o modo Visualização (Paredes Inteiras) estiver ativo, bloqueamos qualquer pintura
+    if (!isCutaway) return; 
 
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
