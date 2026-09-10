@@ -35,15 +35,19 @@
             </p>
         </div>
 
-        <!-- ATUALIZADO: Gizmos de Altura (Parede e Telhado) -->
         <div class="tool-section">
             <h3>Altura da Parede: <span id="valorAltura">48</span>px</h3>
             <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">
         </div>
 
+        <!-- ATUALIZADO: Dropdown Clássico de 3 Níveis -->
         <div class="tool-section">
-            <h3>Altura do Telhado: <span id="valorRoofPitch">20</span></h3>
-            <input type="range" id="sliderRoofPitch" min="0" max="60" value="20" style="width: 100%; cursor: pointer;">
+            <h3>Inclinação do Telhado</h3>
+            <select id="roofPitchSelect" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                <option value="12">Baixo</option>
+                <option value="24" selected>Médio</option>
+                <option value="40">Alto</option>
+            </select>
         </div>
 
         <div class="tool-section">

@@ -17,8 +17,8 @@ let undergroundColor = '#0a0705';
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
-// NOVA VARIÁVEL: Gizmo de altura do telhado
-let roofPitch = 20;
+// ATUALIZADO: Pitch padrão médio
+let roofPitch = 24;
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -620,8 +620,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // ATUALIZADO: Usando o Gizmo do Mestre (roofPitch) dinamicamente no cálculo da malha
-    if (!isCutaway && fIndex >= 0 && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+    // ATUALIZADO: Regra fIndex >= currentFloor esconde telhados inferiores quando estamos em andares superiores
+    if (!isCutaway && fIndex >= 0 && fIndex >= currentFloor && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
         let c_pN = gridToScreen(bounds.minR, bounds.minC);
@@ -638,7 +638,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let midC = (bounds.minC + bounds.maxC + 1) / 2;
         let peak = gridToScreen(midR, midC);
         
-        // Multiplicador da altura da pirâmide via Gizmo UI
         let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * roofPitch;
         peak.y -= (blockHeight + roofHeight);
 
@@ -833,11 +832,9 @@ document.getElementById('sliderAltura').addEventListener('input', (e) => {
     drawIsometricGrid();
 });
 
-// NOVO: Ouvinte do Slider de Pitch do Telhado
-document.getElementById('sliderRoofPitch').addEventListener('input', (e) => {
+// ATUALIZADO: Dropdown do The Sims
+document.getElementById('roofPitchSelect').addEventListener('change', (e) => {
     roofPitch = parseInt(e.target.value);
-    document.getElementById('valorRoofPitch').innerText = roofPitch;
-    updatePreview();
     drawIsometricGrid();
 });
 
