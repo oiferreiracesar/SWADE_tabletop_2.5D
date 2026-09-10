@@ -416,9 +416,8 @@ function updatePreview() {
     }
 }
 
-// ATUALIZADO: Agora a função recebe o fIndex em vez do targetMap solto
-function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = false) {
-    const showActiveTools = !isGhost;
+// ATUALIZADO: Assinatura blindada. showActiveTools foi isolado.
+function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
     const targetMap = mapData[fIndex];
 
     for (let row = 0; row < 10; row++) {
@@ -428,18 +427,16 @@ function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = fa
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            // NOVO: Regra de Mascaramento do Grid (Não consome draw calls no vazio)
+            // NOVO: Regra de Mascaramento do Grid Base (não desenha linhas inúteis)
             const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
             let shouldDrawGrid = true;
             
-            if (isGhost) {
-                // Se for um andar fantasma (ex: vendo o térreo estando no andar 1)
-                // Ocultamos a malha cinza se o bloco estiver totalmente vazio para não poluir
+            if (!showActiveTools) {
+                // Se for um andar de fundo (inferior) ou teto (superior), o grid só aparece se tiver estrutura ali
                 shouldDrawGrid = hasContent;
             } else {
-                // Se for o andar ativo (onde o mouse está trabalhando)
+                // No andar ativo de edição, mostra a célula vazia apenas se ela tiver suporte embaixo (permite clique)
                 if (fIndex > 0) {
-                    // Nos andares superiores, o grid VAZIO só aparece se tiver SUPORTE por baixo
                     const supp = isFloorSupported(row, col);
                     shouldDrawGrid = hasContent || supp;
                 }
@@ -463,7 +460,6 @@ function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = fa
                 ctx.fill(); 
             }
             
-            // ATUALIZADO: Desenha a linha de grade respeitando a trava de visibilidade do documento
             if (shouldDrawGrid) {
                 ctx.beginPath();
                 ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
@@ -573,6 +569,7 @@ function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = fa
     }
 }
 
+// ATUALIZADO: Motor Central de Z-Sorting e Mascaramento Dinâmico
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
@@ -580,20 +577,36 @@ function drawIsometricGrid() {
     ctx.translate(originX, originY);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
+    
+    // 1. Renderiza a FUNDAÇÃO (Andares abaixo de você - Sempre fantasmas)
     for (const f of floors) {
         if (f < currentFloor) {
             ctx.save();
             const distance = currentFloor - f;
             ctx.translate(0, distance * levelHeight); 
-            // ATUALIZADO: Passa f (o index) em vez do mapa solto
-            renderLayer(f, true, false, false); 
+            renderLayer(f, true, false, false, false); 
             ctx.restore();
         }
     }
 
+    // 2. Renderiza o ANDAR ATUAL (Com mouse, edição e cor viva)
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
-    // ATUALIZADO: Passa currentFloor
-    renderLayer(currentFloor, false, currentEraseMode, isCutaway);
+    renderLayer(currentFloor, false, currentEraseMode, isCutaway, true);
+
+    // 3. Renderiza o TETO (Andares acima de você - Mascaramento Dinâmico)
+    // Regra: Se o Cutaway estiver ligado (para ver dentro da casa), nós MASCARAMOS (escondemos) o teto.
+    // Se o Cutaway estiver desligado (Paredes Inteiras), nós desenhamos os andares superiores por cima!
+    if (!isCutaway) {
+        for (const f of floors) {
+            if (f > currentFloor) {
+                ctx.save();
+                const distance = f - currentFloor;
+                ctx.translate(0, -distance * levelHeight); // Sobe na tela (Y negativo)
+                renderLayer(f, false, false, false, false); // Sólido, mas sem o mouse de edição
+                ctx.restore();
+            }
+        }
+    }
 
     ctx.restore();
 }
