@@ -431,21 +431,17 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     const pOeste = gridToScreen(row + 1, col);
 
     const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
-    let shouldDrawGrid = true;
     
-    if (!showActiveTools) {
-        shouldDrawGrid = hasContent;
-    } else {
-        if (fIndex > 0) {
-            const supp = isFloorSupported(row, col);
-            shouldDrawGrid = hasContent || supp;
-        }
-    }
+    // ATUALIZADO: A grade cinza pertence única e exclusivamente ao andar ativo.
+    let shouldDrawGrid = false;
 
-    // REGRA CORRIGIDA: No modo Paredes Inteiras, ocultamos a grade exterior vazia APENAS nos andares superiores.
-    // O Térreo (fIndex === 0) sempre manterá seu terreno quadriculado.
-    if (!isCutaway && !hasContent && fIndex > 0) {
-        shouldDrawGrid = false;
+    if (fIndex === currentFloor) {
+        if (currentFloor === 0) {
+            shouldDrawGrid = true; 
+        } else {
+            const supp = isFloorSupported(row, col);
+            shouldDrawGrid = hasContent || supp; 
+        }
     }
 
     if (targetMap[row][col].floor > 0) {
