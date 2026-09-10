@@ -456,7 +456,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     }
 
     let isDirt = false;
-    // ATUALIZADO: Terra maciça agora engloba o Térreo (0) e Subsolo (<0) de forma unificada
     if (fIndex <= 0) {
         if (targetMap[row][col].floor === 0 && !isEnclosed(fIndex, row, col)) {
             isDirt = true;
@@ -610,7 +609,13 @@ function drawIsometricGrid() {
         for (let col = 0; col < 10; col++) {
             
             for (const f of floors) {
+                // REGRA 1: Se estou no subsolo, a superfície não existe
                 if (currentFloor < 0 && f >= 0) {
+                    continue;
+                }
+                
+                // REGRA 2: Se estou na superfície, o subsolo está enterrado
+                if (currentFloor >= 0 && f < 0) {
                     continue;
                 }
 
