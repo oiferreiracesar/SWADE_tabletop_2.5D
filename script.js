@@ -117,22 +117,27 @@ function isEnclosed(fIndex, startRow, startCol) {
     return true; 
 }
 
+// ATUALIZADO: Chão verde no térreo não atua mais como base estrutural
 function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
     const lower = mapData[currentFloor - 1][r][c];
     
-    if (lower.floor > 0 || lower.column === 1) return true;
+    // Suporte restrito a Coluna sólida
+    if (lower.column === 1) return true;
     
+    // Suporte restrito a Paredes ativas embaixo
     if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
     if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
     if (r < 9 && mapData[currentFloor-1][r+1][c].wallR > 0) return true;
 
+    // Suporte restrito a estar contido em cômodo fechado
     if (isEnclosed(currentFloor - 1, r, c)) return true;
 
     return false;
 }
 
+// ATUALIZADO: Chão verde no térreo não autoriza paredes a flutuarem
 function isWallSupported(r, c, side) {
     if (currentFloor <= 0) return true;
     if (!mapData[currentFloor - 1]) return false;
@@ -144,10 +149,10 @@ function isWallSupported(r, c, side) {
     if (side === 'WE' && lower.wallWE > 0) return true;
     if (side === 'NS' && lower.wallNS > 0) return true;
 
-    if (lower.floor > 0 || lower.column === 1) return true;
+    if (lower.column === 1) return true;
 
-    if (side === 'L' && c > 0 && (mapData[currentFloor - 1][r][c - 1].floor > 0 || mapData[currentFloor - 1][r][c - 1].column === 1)) return true;
-    if (side === 'R' && r > 0 && (mapData[currentFloor - 1][r - 1][c].floor > 0 || mapData[currentFloor - 1][r - 1][c].column === 1)) return true;
+    if (side === 'L' && c > 0 && mapData[currentFloor - 1][r][c - 1].column === 1) return true;
+    if (side === 'R' && r > 0 && mapData[currentFloor - 1][r - 1][c].column === 1) return true;
 
     if (isEnclosed(currentFloor - 1, r, c)) return true;
     if (side === 'L' && c > 0 && isEnclosed(currentFloor - 1, r, c - 1)) return true;
@@ -166,7 +171,6 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
-// ATUALIZADO: O tipo de piso agora respeita as paredes diagonais do andar debaixo para cortar a laje na medida certa
 function getFloorType(r, c, enterDir, hQuad) {
     const lowerMap = currentFloor > 0 ? mapData[currentFloor - 1] : null;
     const wWE = map[r][c].wallWE > 0 || (lowerMap && lowerMap[r][c].wallWE > 0);
@@ -191,7 +195,6 @@ function getFloorType(r, c, enterDir, hQuad) {
     return 1; 
 }
 
-// ATUALIZADO: A fusão de triângulos de piso também respeita o andar de baixo
 function updateFloorState(r, c, incomingType, eraseMode) {
     const current = map[r][c].floor;
     const lowerMap = currentFloor > 0 ? mapData[currentFloor - 1] : null;
@@ -216,7 +219,6 @@ function updateFloorState(r, c, incomingType, eraseMode) {
     }
 }
 
-// ATUALIZADO: O Flood Fill usa as paredes do andar de baixo como barreiras físicas para não vazar a laje
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     
