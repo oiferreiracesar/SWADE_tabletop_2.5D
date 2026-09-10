@@ -12,7 +12,6 @@ const levelHeight = 48;
 let blockHeight = 48; 
 const cutawayHeight = 12; 
 
-// VARIÁVEIS INICIAIS DO CENÁRIO
 let surfaceColor = '#1e293b'; 
 let undergroundColor = '#0a0705'; 
 let dirtColor = '#1e140f'; 
@@ -440,9 +439,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     let shouldDrawGrid = false;
 
     if (fIndex === currentFloor) {
-        if (currentFloor === 0) {
-            shouldDrawGrid = true; 
-        } else if (currentFloor < 0) {
+        if (currentFloor <= 0) {
             shouldDrawGrid = true; 
         } else {
             const supp = isFloorSupported(row, col);
@@ -454,8 +451,13 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         shouldDrawGrid = false;
     }
 
+    if (!isCutaway) {
+        shouldDrawGrid = false;
+    }
+
     let isDirt = false;
-    if (fIndex === currentFloor && fIndex < 0) {
+    // ATUALIZADO: Terra maciça agora engloba o Térreo (0) e Subsolo (<0) de forma unificada
+    if (fIndex <= 0) {
         if (targetMap[row][col].floor === 0 && !isEnclosed(fIndex, row, col)) {
             isDirt = true;
         }
@@ -556,7 +558,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+    if (showActiveTools && isCutaway && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
         if (applyCutaway) colH = cutawayHeight;
@@ -572,7 +574,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools) {
+    if (showActiveTools && isCutaway) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -632,6 +634,8 @@ function drawIsometricGrid() {
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
+
+    if (!isCutaway) return; 
 
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
@@ -706,7 +710,6 @@ document.getElementById('sliderAltura').addEventListener('input', (e) => {
     drawIsometricGrid();
 });
 
-// NOVOS EVENTOS: Controle Direto de Cores do Mestre
 document.getElementById('colorSurface').addEventListener('input', (e) => {
     surfaceColor = e.target.value;
     drawIsometricGrid();
