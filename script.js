@@ -82,7 +82,6 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.stroke();
 }
 
-// NOVA FUNÇÃO: Radar para detectar se um espaço no andar de baixo está cercado por paredes (Cômodo fechado)
 function isEnclosed(fIndex, startRow, startCol) {
     const fMap = mapData[fIndex];
     if (!fMap) return false;
@@ -94,56 +93,46 @@ function isEnclosed(fIndex, startRow, startCol) {
     while (queue.length > 0) {
         const {r, c} = queue.shift();
 
-        // Se bater numa parede diagonal, ela também serve de barreira
         if (fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0) {
             continue;
         }
 
-        // Verifica a Esquerda (Noroeste)
         if (fMap[r][c].wallL === 0) {
-            if (c === 0) return false; // Vazou do mapa (não é fechado)
+            if (c === 0) return false; 
             if (!visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
         }
-        // Verifica a Direita (Sudeste)
         if (c === 9) return false; 
         else if (fMap[r][c+1].wallL === 0) {
             if (!visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
         }
-        // Verifica Acima (Nordeste)
         if (fMap[r][c].wallR === 0) {
             if (r === 0) return false;
             if (!visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
         }
-        // Verifica Abaixo (Sudoeste)
         if (r === 9) return false;
         else if (fMap[r+1][c].wallR === 0) {
             if (!visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
         }
     }
-    return true; // Se a varredura não vazou, é um cômodo fechado perfeito!
+    return true; 
 }
 
-// ATUALIZADO: Agora aceita cômodos fechados inferiores como fundação natural para a laje
 function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
     const lower = mapData[currentFloor - 1][r][c];
     
-    // 1. Tem piso ou coluna embaixo?
     if (lower.floor > 0 || lower.column === 1) return true;
     
-    // 2. Tem alguma parede servindo de apoio direto?
     if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
     if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
     if (r < 9 && mapData[currentFloor-1][r+1][c].wallR > 0) return true;
 
-    // 3. Está dentro de um cômodo fechado lá embaixo?
     if (isEnclosed(currentFloor - 1, r, c)) return true;
 
     return false;
 }
 
-// ATUALIZADO: Agora aceita cômodos fechados inferiores para construir paredes internas na laje
 function isWallSupported(r, c, side) {
     if (currentFloor <= 0) return true;
     if (!mapData[currentFloor - 1]) return false;
@@ -177,9 +166,11 @@ function getTargetEdge(hRow, hCol, hQuad) {
     return null;
 }
 
+// ATUALIZADO: O tipo de piso agora respeita as paredes diagonais do andar debaixo para cortar a laje na medida certa
 function getFloorType(r, c, enterDir, hQuad) {
-    const wWE = map[r][c].wallWE > 0;
-    const wNS = map[r][c].wallNS > 0;
+    const lowerMap = currentFloor > 0 ? mapData[currentFloor - 1] : null;
+    const wWE = map[r][c].wallWE > 0 || (lowerMap && lowerMap[r][c].wallWE > 0);
+    const wNS = map[r][c].wallNS > 0 || (lowerMap && lowerMap[r][c].wallNS > 0);
     
     if (wWE) {
         if (enterDir === 'NW' || enterDir === 'NE') return 2;
@@ -200,10 +191,12 @@ function getFloorType(r, c, enterDir, hQuad) {
     return 1; 
 }
 
+// ATUALIZADO: A fusão de triângulos de piso também respeita o andar de baixo
 function updateFloorState(r, c, incomingType, eraseMode) {
     const current = map[r][c].floor;
-    const wWE = map[r][c].wallWE > 0;
-    const wNS = map[r][c].wallNS > 0;
+    const lowerMap = currentFloor > 0 ? mapData[currentFloor - 1] : null;
+    const wWE = map[r][c].wallWE > 0 || (lowerMap && lowerMap[r][c].wallWE > 0);
+    const wNS = map[r][c].wallNS > 0 || (lowerMap && lowerMap[r][c].wallNS > 0);
 
     if (!eraseMode) {
         if (current === 0) return incomingType;
@@ -223,6 +216,7 @@ function updateFloorState(r, c, incomingType, eraseMode) {
     }
 }
 
+// ATUALIZADO: O Flood Fill usa as paredes do andar de baixo como barreiras físicas para não vazar a laje
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     
@@ -233,6 +227,8 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     const visited = new Set();
     visited.add(`${startRow},${startCol}`);
 
+    const lowerMap = currentFloor > 0 ? mapData[currentFloor - 1] : null;
+
     while(queue.length > 0) {
         const {r, c, type} = queue.shift();
         
@@ -240,35 +236,43 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
         map[r][c].floor = updateFloorState(r, c, type, paintMode === 0);
         
         if (paintMode === 0 && oldFloor === 0) continue;
-        if (map[r][c].wallWE > 0 || map[r][c].wallNS > 0) continue;
+        
+        const wWE = map[r][c].wallWE > 0 || (lowerMap && lowerMap[r][c].wallWE > 0);
+        const wNS = map[r][c].wallNS > 0 || (lowerMap && lowerMap[r][c].wallNS > 0);
+        if (wWE || wNS) continue;
 
         const canNW = [1, 2, 4].includes(type);
         const canNE = [1, 2, 5].includes(type);
         const canSW = [1, 3, 4].includes(type);
         const canSE = [1, 3, 5].includes(type);
 
-        if (canNW && c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
+        const wL = map[r][c].wallL > 0 || (lowerMap && lowerMap[r][c].wallL > 0);
+        const wR = map[r][c].wallR > 0 || (lowerMap && lowerMap[r][c].wallR > 0);
+        const wL_next = c < 9 && (map[r][c+1].wallL > 0 || (lowerMap && lowerMap[r][c+1].wallL > 0));
+        const wR_next = r < 9 && (map[r+1][c].wallR > 0 || (lowerMap && lowerMap[r+1][c].wallR > 0));
+
+        if (canNW && c > 0 && !wL && !visited.has(`${r},${c-1}`)) {
             if (paintMode === 0 || isFloorSupported(r, c-1)) {
                 const nextType = getFloorType(r, c-1, 'SE');
                 visited.add(`${r},${c-1}`);
                 queue.push({r, c: c-1, type: nextType});
             }
         }
-        if (canSE && c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
+        if (canSE && c < 9 && !wL_next && !visited.has(`${r},${c+1}`)) {
             if (paintMode === 0 || isFloorSupported(r, c+1)) {
                 const nextType = getFloorType(r, c+1, 'NW');
                 visited.add(`${r},${c+1}`);
                 queue.push({r, c: c+1, type: nextType});
             }
         }
-        if (canNE && r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
+        if (canNE && r > 0 && !wR && !visited.has(`${r-1},${c}`)) {
             if (paintMode === 0 || isFloorSupported(r-1, c)) {
                 const nextType = getFloorType(r-1, c, 'SW');
                 visited.add(`${r-1},${c}`);
                 queue.push({r: r-1, c, type: nextType});
             }
         }
-        if (canSW && r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
+        if (canSW && r < 9 && !wR_next && !visited.has(`${r+1},${c}`)) {
             if (paintMode === 0 || isFloorSupported(r+1, c)) {
                 const nextType = getFloorType(r+1, c, 'NE');
                 visited.add(`${r+1},${c}`);
