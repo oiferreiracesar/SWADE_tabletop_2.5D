@@ -432,19 +432,23 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
     
-    // CORREÇÃO DEFINITIVA: 
-    // - O andar ativo (fIndex === currentFloor) mantém a regra normal de exibir o grid (seja térreo inteiro ou superior com suporte/conteúdo).
-    // - Andares superiores ao atual (fIndex > currentFloor) NUNCA mostram a grid cinza, garantindo paredes/tetos lisos.
-    // - Andares inferiores (fIndex < currentFloor) operam como fantasma sem grade cinza poluindo.
+    // NOVA REGRA DE PROFUNDIDADE PARA O GRID
     let shouldDrawGrid = false;
 
     if (fIndex === currentFloor) {
+        // Andar atual: sempre mostra o grid (no térreo) ou onde tem suporte (superiores)
         if (currentFloor === 0) {
             shouldDrawGrid = true; 
         } else {
             const supp = isFloorSupported(row, col);
             shouldDrawGrid = hasContent || supp; 
         }
+    } else if (fIndex < currentFloor) {
+        // Fundação: só mostra grid onde há casa, para não poluir
+        shouldDrawGrid = hasContent;
+    } else if (fIndex > currentFloor) {
+        // Andar superior (teto): NUNCA mostra o grid. Garante a parede lisa.
+        shouldDrawGrid = false;
     }
 
     if (targetMap[row][col].floor > 0) {
@@ -473,7 +477,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.stroke();
     }
 
-    if (showActiveTools && isCutaway && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+    if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
         const supp = isFloorSupported(row, col);
         const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
         ctx.beginPath();
@@ -536,7 +540,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    if (showActiveTools && isCutaway && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
         if (applyCutaway) colH = cutawayHeight;
@@ -552,7 +556,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools && isCutaway) {
+    if (showActiveTools) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -607,8 +611,6 @@ function drawIsometricGrid() {
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
-
-    if (!isCutaway) return; 
 
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
