@@ -17,6 +17,9 @@ let undergroundColor = '#0a0705';
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
+// NOVA VARIÁVEL: Gizmo de altura do telhado
+let roofPitch = 20;
+
 let hoverCol = -1;
 let hoverRow = -1;
 let hoverQuadrant = 'none';
@@ -617,7 +620,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // O NOVO GERADOR DE TELHADO ÚNICO (Oclusão Vertical)
+    // ATUALIZADO: Usando o Gizmo do Mestre (roofPitch) dinamicamente no cálculo da malha
     if (!isCutaway && fIndex >= 0 && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
@@ -635,10 +638,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let midC = (bounds.minC + bounds.maxC + 1) / 2;
         let peak = gridToScreen(midR, midC);
         
-        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * 20;
+        // Multiplicador da altura da pirâmide via Gizmo UI
+        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * roofPitch;
         peak.y -= (blockHeight + roofHeight);
 
-        // MÁSCARA DE RECORTE 3D CORRIGIDA: Coluna Vertical Infinita
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(pSul.x, pSul.y - blockHeight); 
@@ -672,7 +675,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.restore(); 
     }
 
-    // CONSERTO: A variável isCutaway foi removida para blindar o pincel de colunas
     if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
@@ -689,7 +691,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    // CONSERTO: A variável isCutaway foi removida para blindar o Landing Pad de paredes
     if (showActiveTools) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
@@ -828,6 +829,14 @@ function updateUI() {
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
     blockHeight = parseInt(e.target.value);
     document.getElementById('valorAltura').innerText = blockHeight;
+    updatePreview();
+    drawIsometricGrid();
+});
+
+// NOVO: Ouvinte do Slider de Pitch do Telhado
+document.getElementById('sliderRoofPitch').addEventListener('input', (e) => {
+    roofPitch = parseInt(e.target.value);
+    document.getElementById('valorRoofPitch').innerText = roofPitch;
     updatePreview();
     drawIsometricGrid();
 });

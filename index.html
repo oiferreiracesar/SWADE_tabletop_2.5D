@@ -35,12 +35,17 @@
             </p>
         </div>
 
+        <!-- ATUALIZADO: Gizmos de Altura (Parede e Telhado) -->
         <div class="tool-section">
-            <h3>Altura: <span id="valorAltura">48</span>px</h3>
+            <h3>Altura da Parede: <span id="valorAltura">48</span>px</h3>
             <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">
         </div>
 
-        <!-- ATUALIZADO: Inclui a cor do Telhado -->
+        <div class="tool-section">
+            <h3>Altura do Telhado: <span id="valorRoofPitch">20</span></h3>
+            <input type="range" id="sliderRoofPitch" min="0" max="60" value="20" style="width: 100%; cursor: pointer;">
+        </div>
+
         <div class="tool-section">
             <h3>Cores do Cenário</h3>
             <div style="display: flex; flex-direction: column; gap: 8px;">
