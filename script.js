@@ -12,9 +12,10 @@ const levelHeight = 48;
 let blockHeight = 48; 
 const cutawayHeight = 12; 
 
-// NOVAS VARIÁVEIS DE CENÁRIO (BIOMAS)
-let surfaceColor = '#1e293b'; // Azul escuro atmosférico (Superfície)
-let undergroundColor = '#0a0705'; // Vazio abissal escuro (Subsolo)
+// VARIÁVEIS DE CENÁRIO DINÂMICO
+let surfaceColor = '#1e293b'; 
+let undergroundColor = '#0a0705'; 
+let dirtColor = '#1e140f'; 
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -461,7 +462,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     }
 
     if (isDirt) {
-        ctx.fillStyle = '#1e140f'; 
+        // ATUALIZADO: Cor da terra agora segue o bioma escolhido
+        ctx.fillStyle = dirtColor; 
         ctx.beginPath();
         ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
         ctx.closePath();
@@ -594,12 +596,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 }
 
 function drawIsometricGrid() {
-    // ATUALIZADO: Pintando o fundo atmosférico
     ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     ctx.save();
-    
     ctx.translate(originX, originY);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
@@ -704,6 +704,29 @@ document.getElementById('sliderAltura').addEventListener('input', (e) => {
     blockHeight = parseInt(e.target.value);
     document.getElementById('valorAltura').innerText = blockHeight;
     updatePreview();
+    drawIsometricGrid();
+});
+
+// NOVO: Ouvinte de evento do Bioma
+document.getElementById('biomeSelect').addEventListener('change', (e) => {
+    const biome = e.target.value;
+    if (biome === 'default') {
+        surfaceColor = '#1e293b';     // Azul noturno
+        undergroundColor = '#0a0705'; // Vazio
+        dirtColor = '#1e140f';        // Terra marrom
+    } else if (biome === 'ocean') {
+        surfaceColor = '#0284c7';     // Água da superfície
+        undergroundColor = '#082f49'; // Profundezas do oceano
+        dirtColor = '#0c4a6e';        // Rocha molhada/azulada
+    } else if (biome === 'dungeon') {
+        surfaceColor = '#3f3f46';     // Cinza/neblina
+        undergroundColor = '#18181b'; // Masmorra negra
+        dirtColor = '#27272a';        // Pedra cinza escura
+    } else if (biome === 'hell') {
+        surfaceColor = '#7f1d1d';     // Céu de fogo
+        undergroundColor = '#450a0a'; // Abismo vulcânico
+        dirtColor = '#2e1012';        // Rocha vulcânica vermelha
+    }
     drawIsometricGrid();
 });
 
