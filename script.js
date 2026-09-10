@@ -8,6 +8,8 @@ const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
 
+// NOVO: Distância vertical exata entre os andares (Empilhamento 3D)
+const levelHeight = 48; 
 let blockHeight = 48; 
 const cutawayHeight = 12; 
 
@@ -315,7 +317,6 @@ function updatePreview() {
     }
 }
 
-// NOVA ARQUITETURA MODULAR: Processa os dados de qualquer andar sem duplicar código
 function renderLayer(targetMap, isGhost, activeEraseMode = false) {
     const showActiveTools = !isGhost;
 
@@ -326,9 +327,7 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            // DESENHO DO PISO
             if (targetMap[row][col].floor > 0) {
-                // Se for fantasma, usa cinza transparente. Senão, verde normal.
                 ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
                 ctx.beginPath();
                 if (targetMap[row][col].floor === 1) { 
@@ -346,14 +345,12 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
                 ctx.fill(); 
             }
             
-            // LINHAS DE GRADE
             ctx.beginPath();
             ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath();
             ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.2)' : '#555'; 
             ctx.stroke();
 
-            // PREVIEW DE PISO (Só desenha no andar atual)
             if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging) {
                 const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
                 ctx.beginPath();
@@ -376,7 +373,6 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
                 ctx.fill();
             }
 
-            // DESENHO DE PAREDES
             let hL = targetMap[row][col].wallL;
             if (isCutaway && hL > 0) hL = cutawayHeight;
             let hR = targetMap[row][col].wallR;
@@ -393,7 +389,6 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
 
-            // PREVIEW DE PAREDE (Só desenha no andar atual)
             if (showActiveTools) {
                 const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
                 if (ghosts.length > 0) {
@@ -416,18 +411,27 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
     }
 }
 
-// ATUALIZADO: Motor Principal limpo. Controla a ordem das camadas.
+// ATUALIZADO: Motor de Pilha 3D.
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
+    
     ctx.translate(originX, originY);
 
-    // 1. Desenha o andar de baixo primeiro (Visão Raio-X em cinza)
-    if (mapData[currentFloor - 1]) {
-        renderLayer(mapData[currentFloor - 1], true);
+    // 1. Desenha TODOS os andares ABAIXO do atual, do mais fundo pro mais raso
+    const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
+    for (const f of floors) {
+        if (f < currentFloor) {
+            ctx.save();
+            const distance = currentFloor - f;
+            // Desloca fisicamente para baixo na tela (48 pixels por andar)
+            ctx.translate(0, distance * levelHeight); 
+            renderLayer(mapData[f], true);
+            ctx.restore();
+        }
     }
 
-    // 2. Desenha o andar atual por cima (Colorido)
+    // 2. Desenha o andar ATUAL no topo (Ancorado no originY original)
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
     renderLayer(map, false, currentEraseMode);
 
