@@ -33,7 +33,6 @@ function createEmptyMap() {
     for (let i = 0; i < 10; i++) {
         newMap[i] = [];
         for (let j = 0; j < 10; j++) {
-            // ATUALIZADO: Propriedade 'column' adicionada na fundação da matriz
             newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0 }; 
         }
     }
@@ -83,12 +82,35 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.stroke();
 }
 
-// NOVA TRAVA DE FÍSICA: Verifica se o bloco de baixo tem piso ou coluna
-function isSupported(r, c) {
-    if (currentFloor <= 0) return true; // Térreo e subsolo sempre têm sustentação da terra
+// ATUALIZADO: Trava de Sustentação separada para Pisos e Colunas
+function isFloorSupported(r, c) {
+    if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
     const lowerBlock = mapData[currentFloor - 1][r][c];
     return lowerBlock.floor > 0 || lowerBlock.column === 1;
+}
+
+// NOVO: Trava de Sustentação dedicada para Paredes
+function isWallSupported(r, c, side) {
+    if (currentFloor <= 0) return true;
+    if (!mapData[currentFloor - 1]) return false;
+
+    const lower = mapData[currentFloor - 1][r][c];
+
+    // 1. A parede superior empilha perfeitamente na parede inferior?
+    if (side === 'L' && lower.wallL > 0) return true;
+    if (side === 'R' && lower.wallR > 0) return true;
+    if (side === 'WE' && lower.wallWE > 0) return true;
+    if (side === 'NS' && lower.wallNS > 0) return true;
+
+    // 2. O bloco atual tem chão ou coluna debaixo dessa parede?
+    if (lower.floor > 0 || lower.column === 1) return true;
+
+    // 3. O bloco vizinho (que compartilha essa borda) tem chão ou coluna?
+    if (side === 'L' && c > 0 && (mapData[currentFloor - 1][r][c - 1].floor > 0 || mapData[currentFloor - 1][r][c - 1].column === 1)) return true;
+    if (side === 'R' && r > 0 && (mapData[currentFloor - 1][r - 1][c].floor > 0 || mapData[currentFloor - 1][r - 1][c].column === 1)) return true;
+
+    return false;
 }
 
 function getTargetEdge(hRow, hCol, hQuad) {
@@ -150,8 +172,7 @@ function updateFloorState(r, c, incomingType, eraseMode) {
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     
-    // Trava do preenchimento: Se tentar preencher no vazio, aborta.
-    if (paintMode === 1 && !isSupported(startRow, startCol)) return;
+    if (paintMode === 1 && !isFloorSupported(startRow, startCol)) return;
     
     const startType = getFloorType(startRow, startCol, 'CLICK', startQuad);
     const queue = [{r: startRow, c: startCol, type: startType}];
@@ -173,28 +194,28 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
         const canSE = [1, 3, 5].includes(type);
 
         if (canNW && c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
-            if (paintMode === 0 || isSupported(r, c-1)) {
+            if (paintMode === 0 || isFloorSupported(r, c-1)) {
                 const nextType = getFloorType(r, c-1, 'SE');
                 visited.add(`${r},${c-1}`);
                 queue.push({r, c: c-1, type: nextType});
             }
         }
         if (canSE && c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
-            if (paintMode === 0 || isSupported(r, c+1)) {
+            if (paintMode === 0 || isFloorSupported(r, c+1)) {
                 const nextType = getFloorType(r, c+1, 'NW');
                 visited.add(`${r},${c+1}`);
                 queue.push({r, c: c+1, type: nextType});
             }
         }
         if (canNE && r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
-            if (paintMode === 0 || isSupported(r-1, c)) {
+            if (paintMode === 0 || isFloorSupported(r-1, c)) {
                 const nextType = getFloorType(r-1, c, 'SW');
                 visited.add(`${r-1},${c}`);
                 queue.push({r: r-1, c, type: nextType});
             }
         }
         if (canSW && r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
-            if (paintMode === 0 || isSupported(r+1, c)) {
+            if (paintMode === 0 || isFloorSupported(r+1, c)) {
                 const nextType = getFloorType(r+1, c, 'NE');
                 visited.add(`${r+1},${c}`);
                 queue.push({r: r+1, c, type: nextType});
@@ -335,9 +356,9 @@ function updatePreview() {
         }
     }
 
-    // Trava de Segurança na Pré-visualização de Paredes: Apaga o fantasma de paredes sem apoio
+    // ATUALIZADO: Agora usa isWallSupported para não apagar paredes válidas
     if (!currentEraseMode) {
-        previewWalls = previewWalls.filter(p => isSupported(p.row, p.col));
+        previewWalls = previewWalls.filter(p => isWallSupported(p.row, p.col, p.side));
     }
 }
 
@@ -351,7 +372,6 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            // DESENHO DO PISO
             if (targetMap[row][col].floor > 0) {
                 ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
                 ctx.beginPath();
@@ -376,9 +396,9 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.2)' : '#555'; 
             ctx.stroke();
 
-            // PREVIEW DE PISO COM TRAVA DE SEGURANÇA
+            // PREVIEW DE PISO
             if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
-                const supp = isSupported(row, col);
+                const supp = isFloorSupported(row, col);
                 const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
                 ctx.beginPath();
                 if (previewType === 1) { 
@@ -394,13 +414,12 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
                 }
                 ctx.closePath();
                 
-                if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)'; // Indica BLOQUEADO (Vermelho)
+                if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)';
                 else if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
                 else ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
                 ctx.fill();
             }
 
-            // DESENHO DE PAREDES
             let hL = targetMap[row][col].wallL;
             if (isCutaway && hL > 0) hL = cutawayHeight;
             let hR = targetMap[row][col].wallR;
@@ -417,7 +436,6 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
 
-            // NOVO: DESENHO DA COLUNA (Pilar 3D no centro do losango)
             if (targetMap[row][col].column === 1) {
                 let colH = blockHeight;
                 if (isCutaway) colH = cutawayHeight;
@@ -427,34 +445,30 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
                 ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3';
                 ctx.strokeStyle = isGhost ? 'transparent' : '#555';
                 
-                // Topo da coluna
                 ctx.beginPath();
                 ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH);
                 ctx.closePath(); ctx.fill(); ctx.stroke();
                 
-                // Face esquerda da coluna
                 ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
                 ctx.beginPath();
                 ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy);
                 ctx.closePath(); ctx.fill(); ctx.stroke();
                 
-                // Face direita da coluna
                 ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
                 ctx.beginPath();
                 ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4);
                 ctx.closePath(); ctx.fill(); ctx.stroke();
             }
 
-            // PREVIEW FANTASMA DE COLUNA (HOVER DA FERRAMENTA 6)
             if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
-                const supp = isSupported(row, col);
+                const supp = isFloorSupported(row, col);
                 let colH = blockHeight;
                 if (isCutaway) colH = cutawayHeight;
                 const cx = pNorte.x;
                 const cy = pNorte.y + (tileHeight / 2);
                 
                 let ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-                if (!supp && !activeEraseMode) ghostColor = 'rgba(255, 50, 50, 0.4)'; // Bloqueado
+                if (!supp && !activeEraseMode) ghostColor = 'rgba(255, 50, 50, 0.4)'; 
                 
                 ctx.fillStyle = ghostColor;
                 ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
@@ -512,15 +526,14 @@ function applySmartBrush() {
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 1) { 
-        if (!currentEraseMode && !isSupported(hoverRow, hoverCol)) return;
+        if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         const type = getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant);
         map[hoverRow][hoverCol].floor = updateFloorState(hoverRow, hoverCol, type, currentEraseMode); 
         return; 
     }
     
-    // ATUALIZADO: Ferramenta de Coluna
     if (currentBrush === 6) {
-        if (!currentEraseMode && !isSupported(hoverRow, hoverCol)) return;
+        if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         map[hoverRow][hoverCol].column = currentEraseMode ? 0 : 1;
         return;
     }
@@ -537,7 +550,7 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
     if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
-        if (!currentEraseMode && !isSupported(tRow, tCol)) return;
+        if (!currentEraseMode && !isWallSupported(tRow, tCol, side)) return;
 
         if (currentEraseMode) {
             if (side === 'L') map[tRow][tCol].wallL = 0;
