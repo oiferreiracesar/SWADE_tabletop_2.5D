@@ -23,10 +23,9 @@ let isCutaway = true;
 let mapHistory = [];
 let isErasing = false;
 
-// NOVO: Gerenciador de andares
 let currentFloor = 0;
 let mapData = {};
-let map; // Ponteiro dinâmico para o andar atual
+let map; 
 
 function createEmptyMap() {
     const newMap = [];
@@ -39,17 +38,15 @@ function createEmptyMap() {
     return newMap;
 }
 
-// Inicializa o Térreo (Andar 0)
 mapData[0] = createEmptyMap();
 map = mapData[0];
 
 document.addEventListener('contextmenu', e => e.preventDefault());
 
-// ATUALIZADO: Salva o prédio inteiro e qual andar o jogador está olhando
 function saveState() {
     const snapshot = {
         floor: currentFloor,
-        data: JSON.parse(JSON.stringify(mapData)) // Clone profundo para segurança total
+        data: JSON.parse(JSON.stringify(mapData)) 
     };
     mapHistory.push(snapshot);
     if (mapHistory.length > 30) mapHistory.shift();
@@ -318,13 +315,9 @@ function updatePreview() {
     }
 }
 
-function drawIsometricGrid() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    ctx.save();
-    ctx.translate(originX, originY);
-
-    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
+// NOVA ARQUITETURA MODULAR: Processa os dados de qualquer andar sem duplicar código
+function renderLayer(targetMap, isGhost, activeEraseMode = false) {
+    const showActiveTools = !isGhost;
 
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
@@ -333,31 +326,35 @@ function drawIsometricGrid() {
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
-            if (map[row][col].floor > 0) {
-                ctx.fillStyle = 'rgba(100, 200, 100, 0.6)'; 
+            // DESENHO DO PISO
+            if (targetMap[row][col].floor > 0) {
+                // Se for fantasma, usa cinza transparente. Senão, verde normal.
+                ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
                 ctx.beginPath();
-                if (map[row][col].floor === 1) { 
+                if (targetMap[row][col].floor === 1) { 
                     ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (map[row][col].floor === 2) { 
+                } else if (targetMap[row][col].floor === 2) { 
                     ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (map[row][col].floor === 3) { 
+                } else if (targetMap[row][col].floor === 3) { 
                     ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
-                } else if (map[row][col].floor === 4) { 
+                } else if (targetMap[row][col].floor === 4) { 
                     ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
-                } else if (map[row][col].floor === 5) { 
+                } else if (targetMap[row][col].floor === 5) { 
                     ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
                 }
                 ctx.closePath();
                 ctx.fill(); 
             }
             
+            // LINHAS DE GRADE
             ctx.beginPath();
             ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath();
-            ctx.strokeStyle = '#555'; 
+            ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.2)' : '#555'; 
             ctx.stroke();
 
-            if (row === hoverRow && col === hoverCol && !isDragging) {
+            // PREVIEW DE PISO (Só desenha no andar atual)
+            if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging) {
                 const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
                 ctx.beginPath();
                 if (previewType === 1) { 
@@ -373,53 +370,67 @@ function drawIsometricGrid() {
                 }
                 ctx.closePath();
                 
-                if (currentEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+                if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
                 else if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
                 else ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
                 ctx.fill();
             }
 
-            let hL = map[row][col].wallL;
+            // DESENHO DE PAREDES
+            let hL = targetMap[row][col].wallL;
             if (isCutaway && hL > 0) hL = cutawayHeight;
-            
-            let hR = map[row][col].wallR;
+            let hR = targetMap[row][col].wallR;
             if (isCutaway && hR > 0) hR = cutawayHeight;
 
-            if (hL > 0) drawFlatWall(pOeste, pNorte, hL, '#b71c1c'); 
-            if (hR > 0) drawFlatWall(pNorte, pLeste, hR, '#e53935'); 
+            if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
+            if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
 
-            let hWE = map[row][col].wallWE;
+            let hWE = targetMap[row][col].wallWE;
             if (isCutaway && hWE > 0) hWE = cutawayHeight;
-            
-            let hNS = map[row][col].wallNS;
+            let hNS = targetMap[row][col].wallNS;
             if (isCutaway && hNS > 0) hNS = cutawayHeight;
 
-            if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, '#d32f2f'); 
-            if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, '#c62828'); 
+            if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
+            if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
 
-            const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
-            if (ghosts.length > 0) {
-                ctx.globalAlpha = 0.7;
-                const ghostColor = currentEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-                
-                ghosts.forEach(p => {
-                    let hGhost = blockHeight;
-                    if (isCutaway) hGhost = cutawayHeight;
+            // PREVIEW DE PAREDE (Só desenha no andar atual)
+            if (showActiveTools) {
+                const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
+                if (ghosts.length > 0) {
+                    ctx.globalAlpha = 0.7;
+                    const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+                    
+                    ghosts.forEach(p => {
+                        let hGhost = blockHeight;
+                        if (isCutaway) hGhost = cutawayHeight;
 
-                    if (p.side === 'L') {
-                        drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
-                    } else if (p.side === 'R') {
-                        drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
-                    } else if (p.side === 'WE') {
-                        drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
-                    } else if (p.side === 'NS') {
-                        drawFlatWall(pNorte, pSul, hGhost, ghostColor);
-                    }
-                });
-                ctx.globalAlpha = 1.0;
+                        if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
+                        else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
+                        else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
+                        else if (p.side === 'NS') drawFlatWall(pNorte, pSul, hGhost, ghostColor);
+                    });
+                    ctx.globalAlpha = 1.0;
+                }
             }
         }
     }
+}
+
+// ATUALIZADO: Motor Principal limpo. Controla a ordem das camadas.
+function drawIsometricGrid() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(originX, originY);
+
+    // 1. Desenha o andar de baixo primeiro (Visão Raio-X em cinza)
+    if (mapData[currentFloor - 1]) {
+        renderLayer(mapData[currentFloor - 1], true);
+    }
+
+    // 2. Desenha o andar atual por cima (Colorido)
+    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
+    renderLayer(map, false, currentEraseMode);
+
     ctx.restore();
 }
 
@@ -454,17 +465,14 @@ function applySmartBrush() {
     }
 }
 
-// NOVO: Função para alterar de andar e sincronizar o motor
 function changeFloor(delta) {
-    saveState(); // Salva o prédio atual para permitir Ctrl+Z da navegação
+    saveState(); 
     currentFloor += delta;
     
-    // Se o andar visitado for novo, cria um chão vazio para ele
     if (!mapData[currentFloor]) {
         mapData[currentFloor] = createEmptyMap();
     }
     
-    // O ponteiro 'map' passa a apontar para a nova matriz
     map = mapData[currentFloor];
     
     updateUI();
@@ -481,7 +489,6 @@ function updateUI() {
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
-    // ATUALIZADO: Renderiza o texto correto do andar atual no menu HTML
     let floorName = currentFloor === 0 ? "Térreo (0)" : (currentFloor > 0 ? `Superior (${currentFloor})` : `Subsolo (${currentFloor})`);
     document.getElementById('floorLabel').innerText = `Andar Atual: ${floorName}`;
 }
@@ -632,7 +639,6 @@ window.addEventListener('keydown', (e) => {
         document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
         setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
 
-        // ATUALIZADO: Carrega não apenas o desenho, mas todos os andares e foca no andar correto
         if (mapHistory.length > 0) {
             const previousState = mapHistory.pop();
             currentFloor = previousState.floor;
@@ -664,7 +670,6 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
-// LIGAÇÃO DOS NOVOS BOTÕES DO HTML
 document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
 document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
 
