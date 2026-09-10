@@ -40,15 +40,23 @@
             <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">
         </div>
 
-        <!-- NOVA SEÇÃO: Controle de Biomas -->
+        <!-- ATUALIZADO: Seletores de Cor Livres para o Mestre -->
         <div class="tool-section">
-            <h3>Bioma / Cenário</h3>
-            <select id="biomeSelect" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                <option value="default">Padrão (Noite / Terra)</option>
-                <option value="ocean">Oceano (Navio / Fundo do Mar)</option>
-                <option value="dungeon">Fortaleza (Pedra / Masmorra)</option>
-                <option value="hell">Submundo (Céu Rubro / Magma)</option>
-            </select>
+            <h3>Cores do Cenário</h3>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
+                    Superfície: 
+                    <input type="color" id="colorSurface" value="#1e293b" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
+                </label>
+                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
+                    Fundo Subsolo: 
+                    <input type="color" id="colorUnderground" value="#0a0705" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
+                </label>
+                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
+                    Terra Maciça: 
+                    <input type="color" id="colorDirt" value="#1e140f" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
+                </label>
+            </div>
         </div>
 
         <div class="tool-section">
