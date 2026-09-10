@@ -33,7 +33,6 @@ let currentFloor = 0;
 let mapData = {};
 let map; 
 
-// NOVAS VARIÁVEIS DE OTIMIZAÇÃO: Caches de Bounding Box
 let enclosedCache = {};
 let roomBoundsCache = {};
 
@@ -126,7 +125,6 @@ function isEnclosed(fIndex, startRow, startCol) {
     return true; 
 }
 
-// NOVA FUNÇÃO: Calcula todos os cômodos e seus Bounding Boxes antes de renderizar (Máxima Otimização)
 function precalculateRooms() {
     enclosedCache = {};
     roomBoundsCache = {};
@@ -218,15 +216,11 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
-// ATUALIZADO: Removemos o isEnclosed para resolver o buraco (lacuna do losango) na laje
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
     const cell = upper[r][c];
-    
-    // Agora o telhado só some se você PINTAR uma laje real (ou parede) em cima dele
     if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
-    
     return false;
 }
 
@@ -521,7 +515,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         shouldDrawGrid = false;
     }
 
-    // ATUALIZADO: Terra maciça usa o cache de cômodos pré-calculados para ultra-velocidade
     let isDirt = false;
     if (fIndex <= 0) {
         if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
@@ -624,11 +617,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // NOVO GERADOR DE TELHADO ÚNICO (Oclusão e Bounding Box)
+    // O NOVO GERADOR DE TELHADO ÚNICO (Oclusão Vertical)
     if (!isCutaway && fIndex >= 0 && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
-        // As 4 pontas globais do cômodo inteiro
         let c_pN = gridToScreen(bounds.minR, bounds.minC);
         let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1);
         let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1);
@@ -639,26 +631,24 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         c_pS.y -= blockHeight;
         c_pW.y -= blockHeight;
 
-        // O centro (cume) da pirâmide gigante
         let midR = (bounds.minR + bounds.maxR + 1) / 2;
         let midC = (bounds.minC + bounds.maxC + 1) / 2;
         let peak = gridToScreen(midR, midC);
         
-        // A altura do telhado cresce proporcionalmente ao tamanho do cômodo
-        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * 16;
+        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * 20;
         peak.y -= (blockHeight + roofHeight);
 
-        // MÁSCARA DE RECORTE (Isola apenas o fragmento de telhado da célula atual)
+        // MÁSCARA DE RECORTE 3D CORRIGIDA: Coluna Vertical Infinita
         ctx.save();
         ctx.beginPath();
-        ctx.moveTo(pNorte.x, pNorte.y - blockHeight);
-        ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-        ctx.lineTo(pSul.x, pSul.y - blockHeight);
-        ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
+        ctx.moveTo(pSul.x, pSul.y - blockHeight); 
+        ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
+        ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
+        ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
+        ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
         ctx.closePath();
-        ctx.clip(); // Impede que o desenho da pirâmide vaze para fora da célula!
+        ctx.clip(); 
 
-        // Função interna para desenhar as faces da pirâmide com sombra
         const drawTri = (p1, p2, p3, overlay) => {
             ctx.fillStyle = roofColor;
             ctx.beginPath(); 
@@ -674,16 +664,16 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.stroke();
         };
 
-        // Renderização isométrica perfeita em 4 águas (Hipped Roof)
-        drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); // Lado Oculto
-        drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); // Lado Meia-Luz
-        drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); // Lado Iluminado (Sol)
-        drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); // Lado Sombra
+        drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); 
+        drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); 
+        drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); 
+        drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); 
 
-        ctx.restore(); // Finaliza a máscara
+        ctx.restore(); 
     }
 
-    if (showActiveTools && isCutaway && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+    // CONSERTO: A variável isCutaway foi removida para blindar o pincel de colunas
+    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
         if (applyCutaway) colH = cutawayHeight;
@@ -699,7 +689,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools && isCutaway) {
+    // CONSERTO: A variável isCutaway foi removida para blindar o Landing Pad de paredes
+    if (showActiveTools) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -722,7 +713,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 }
 
 function drawIsometricGrid() {
-    precalculateRooms(); // ATUALIZADO: Chama o otimizador geométrico ANTES de desenhar
+    precalculateRooms(); 
     
     ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -853,7 +844,6 @@ document.getElementById('colorDirt').addEventListener('input', (e) => {
     dirtColor = e.target.value;
     drawIsometricGrid();
 });
-// NOVO: Ouvinte do seletor do Telhado
 document.getElementById('colorRoof').addEventListener('input', (e) => {
     roofColor = e.target.value;
     drawIsometricGrid();
