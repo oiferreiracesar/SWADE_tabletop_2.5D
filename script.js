@@ -442,8 +442,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     }
 
-    // NOVA REGRA: Oculta a grade vazia em todos os andares se o modo Paredes Inteiras estiver ativo
-    if (!isCutaway && !hasContent) {
+    // REGRA CORRIGIDA: No modo Paredes Inteiras, ocultamos a grade exterior vazia APENAS nos andares superiores.
+    // O Térreo (fIndex === 0) sempre manterá seu terreno quadriculado.
+    if (!isCutaway && !hasContent && fIndex > 0) {
         shouldDrawGrid = false;
     }
 
