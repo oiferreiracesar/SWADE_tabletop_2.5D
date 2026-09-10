@@ -432,6 +432,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
     
+    // CORREÇÃO DEFINITIVA: 
+    // - O andar ativo (fIndex === currentFloor) mantém a regra normal de exibir o grid (seja térreo inteiro ou superior com suporte/conteúdo).
+    // - Andares superiores ao atual (fIndex > currentFloor) NUNCA mostram a grid cinza, garantindo paredes/tetos lisos.
+    // - Andares inferiores (fIndex < currentFloor) operam como fantasma sem grade cinza poluindo.
     let shouldDrawGrid = false;
 
     if (fIndex === currentFloor) {
@@ -441,13 +445,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             const supp = isFloorSupported(row, col);
             shouldDrawGrid = hasContent || supp; 
         }
-    }
-
-    // A REGRA DE OURO QUE VOCÊ PEDIU:
-    // Se Paredes Inteiras estiver ativado (!isCutaway), ocultamos o grid de TODOS os andares.
-    // Isso garante a "parede lisa" perfeita e limpa a poluição visual completamente.
-    if (!isCutaway) {
-        shouldDrawGrid = false;
     }
 
     if (targetMap[row][col].floor > 0) {
@@ -476,7 +473,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.stroke();
     }
 
-    // Oculta os cursores verdes e vermelhos no modo Visualização (Paredes Inteiras) para não quebrar a imersão
     if (showActiveTools && isCutaway && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
         const supp = isFloorSupported(row, col);
         const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
@@ -612,7 +608,6 @@ function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
-    // Se o modo Visualização (Paredes Inteiras) estiver ativo, bloqueamos qualquer pintura
     if (!isCutaway) return; 
 
     if (currentBrush === 1) { 
