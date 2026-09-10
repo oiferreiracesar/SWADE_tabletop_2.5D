@@ -15,7 +15,7 @@ const cutawayHeight = 12;
 let surfaceColor = '#1e293b'; 
 let undergroundColor = '#0a0705'; 
 let dirtColor = '#1e140f'; 
-let roofColor = '#475569'; // Cinza ardósia padrão
+let roofColor = '#475569'; 
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -32,6 +32,10 @@ let isErasing = false;
 let currentFloor = 0;
 let mapData = {};
 let map; 
+
+// NOVAS VARIÁVEIS DE OTIMIZAÇÃO: Caches de Bounding Box
+let enclosedCache = {};
+let roomBoundsCache = {};
 
 function createEmptyMap() {
     const newMap = [];
@@ -122,6 +126,59 @@ function isEnclosed(fIndex, startRow, startCol) {
     return true; 
 }
 
+// NOVA FUNÇÃO: Calcula todos os cômodos e seus Bounding Boxes antes de renderizar (Máxima Otimização)
+function precalculateRooms() {
+    enclosedCache = {};
+    roomBoundsCache = {};
+    const floors = Object.keys(mapData).map(Number);
+    
+    for (const f of floors) {
+        for (let r = 0; r < 10; r++) {
+            for (let c = 0; c < 10; c++) {
+                enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
+            }
+        }
+        
+        const visited = new Set();
+        for (let r = 0; r < 10; r++) {
+            for (let c = 0; c < 10; c++) {
+                if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
+                    let minR = r, maxR = r, minC = c, maxC = c;
+                    const queue = [{r, c}];
+                    const roomCells = [];
+                    visited.add(`${r},${c}`);
+                    
+                    while (queue.length > 0) {
+                        const curr = queue.shift();
+                        roomCells.push(curr);
+                        minR = Math.min(minR, curr.r);
+                        maxR = Math.max(maxR, curr.r);
+                        minC = Math.min(minC, curr.c);
+                        maxC = Math.max(maxC, curr.c);
+                        
+                        const neighbors = [
+                            {r: curr.r-1, c: curr.c}, {r: curr.r+1, c: curr.c},
+                            {r: curr.r, c: curr.c-1}, {r: curr.r, c: curr.c+1}
+                        ];
+                        for (let n of neighbors) {
+                            if (n.r >= 0 && n.r < 10 && n.c >= 0 && n.c < 10) {
+                                if (!visited.has(`${n.r},${n.c}`) && enclosedCache[`${f},${n.r},${n.c}`]) {
+                                    visited.add(`${n.r},${n.c}`);
+                                    queue.push(n);
+                                }
+                            }
+                        }
+                    }
+                    const bounds = {minR, maxR, minC, maxC};
+                    for (let cell of roomCells) {
+                        roomBoundsCache[`${f},${cell.r},${cell.c}`] = bounds;
+                    }
+                }
+            }
+        }
+    }
+}
+
 function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
@@ -161,17 +218,14 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
-// NOVA FUNÇÃO: O Radar Vertical que detecta se há construção acima
+// ATUALIZADO: Removemos o isEnclosed para resolver o buraco (lacuna do losango) na laje
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
     const cell = upper[r][c];
     
-    // Se tem chão, parede ou coluna em cima, o telhado não deve ser gerado.
+    // Agora o telhado só some se você PINTAR uma laje real (ou parede) em cima dele
     if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
-    
-    // Se o andar de cima tem uma sala fechada naquele quadrado, também inibe o telhado.
-    if (isEnclosed(fIndex + 1, r, c)) return true;
     
     return false;
 }
@@ -467,9 +521,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         shouldDrawGrid = false;
     }
 
+    // ATUALIZADO: Terra maciça usa o cache de cômodos pré-calculados para ultra-velocidade
     let isDirt = false;
     if (fIndex <= 0) {
-        if (targetMap[row][col].floor === 0 && !isEnclosed(fIndex, row, col)) {
+        if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
             isDirt = true;
         }
     }
@@ -569,21 +624,41 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // O NOVO GERADOR DE TELHADO (Bounding Box Procedural Generation)
-    // Regra: Não está CORTADA E está num cômodo fechado E não tem andares em cima dele
-    if (!isCutaway && fIndex >= 0 && isEnclosed(fIndex, row, col) && !hasStructureAbove(fIndex, row, col)) {
-        let rH = 24; // Altura da pirâmide do telhado
+    // NOVO GERADOR DE TELHADO ÚNICO (Oclusão e Bounding Box)
+    if (!isCutaway && fIndex >= 0 && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+        const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
-        // As 4 pontas no topo da parede
-        let c_pN = {x: pNorte.x, y: pNorte.y - blockHeight};
-        let c_pE = {x: pLeste.x, y: pLeste.y - blockHeight};
-        let c_pS = {x: pSul.x, y: pSul.y - blockHeight};
-        let c_pW = {x: pOeste.x, y: pOeste.y - blockHeight};
+        // As 4 pontas globais do cômodo inteiro
+        let c_pN = gridToScreen(bounds.minR, bounds.minC);
+        let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1);
+        let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1);
+        let c_pW = gridToScreen(bounds.maxR + 1, bounds.minC);
         
-        // O cume (pico) do telhado no centro do bloco
-        let peak = {x: pNorte.x, y: pNorte.y + (tileHeight / 2) - blockHeight - rH};
+        c_pN.y -= blockHeight;
+        c_pE.y -= blockHeight;
+        c_pS.y -= blockHeight;
+        c_pW.y -= blockHeight;
 
-        // Função de desenho de triângulos do telhado com sombreamento fixo para 3D
+        // O centro (cume) da pirâmide gigante
+        let midR = (bounds.minR + bounds.maxR + 1) / 2;
+        let midC = (bounds.minC + bounds.maxC + 1) / 2;
+        let peak = gridToScreen(midR, midC);
+        
+        // A altura do telhado cresce proporcionalmente ao tamanho do cômodo
+        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * 16;
+        peak.y -= (blockHeight + roofHeight);
+
+        // MÁSCARA DE RECORTE (Isola apenas o fragmento de telhado da célula atual)
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(pNorte.x, pNorte.y - blockHeight);
+        ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
+        ctx.lineTo(pSul.x, pSul.y - blockHeight);
+        ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
+        ctx.closePath();
+        ctx.clip(); // Impede que o desenho da pirâmide vaze para fora da célula!
+
+        // Função interna para desenhar as faces da pirâmide com sombra
         const drawTri = (p1, p2, p3, overlay) => {
             ctx.fillStyle = roofColor;
             ctx.beginPath(); 
@@ -591,24 +666,24 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.closePath(); 
             ctx.fill();
             
-            // Camada de Luz/Sombra
             ctx.fillStyle = overlay; 
             ctx.fill();
             
-            // Contorno sutil para textura das telhas
             ctx.strokeStyle = 'rgba(0,0,0,0.15)'; 
             ctx.lineWidth = 1; 
             ctx.stroke();
         };
 
-        // Renderiza de trás pra frente (Z-Sorting das faces)
-        drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); // Noroeste (Sombreado)
-        drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); // Nordeste (Suave)
-        drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); // Sudoeste (Iluminado)
-        drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); // Sudeste (Sombra pesada)
+        // Renderização isométrica perfeita em 4 águas (Hipped Roof)
+        drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); // Lado Oculto
+        drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); // Lado Meia-Luz
+        drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); // Lado Iluminado (Sol)
+        drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); // Lado Sombra
+
+        ctx.restore(); // Finaliza a máscara
     }
 
-    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+    if (showActiveTools && isCutaway && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
         if (applyCutaway) colH = cutawayHeight;
@@ -624,7 +699,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools) {
+    if (showActiveTools && isCutaway) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -647,6 +722,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 }
 
 function drawIsometricGrid() {
+    precalculateRooms(); // ATUALIZADO: Chama o otimizador geométrico ANTES de desenhar
+    
     ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
@@ -776,6 +853,7 @@ document.getElementById('colorDirt').addEventListener('input', (e) => {
     dirtColor = e.target.value;
     drawIsometricGrid();
 });
+// NOVO: Ouvinte do seletor do Telhado
 document.getElementById('colorRoof').addEventListener('input', (e) => {
     roofColor = e.target.value;
     drawIsometricGrid();
