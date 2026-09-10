@@ -438,6 +438,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     
     let shouldDrawGrid = false;
 
+    // ATUALIZADO: A grade segue puramente as regras de Z-Sorting (Profundidade)
     if (fIndex === currentFloor) {
         if (currentFloor <= 0) {
             shouldDrawGrid = true; 
@@ -448,10 +449,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     } else if (fIndex < currentFloor) {
         shouldDrawGrid = hasContent;
     } else if (fIndex > currentFloor) {
-        shouldDrawGrid = false;
-    }
-
-    if (!isCutaway) {
         shouldDrawGrid = false;
     }
 
@@ -609,12 +606,10 @@ function drawIsometricGrid() {
         for (let col = 0; col < 10; col++) {
             
             for (const f of floors) {
-                // REGRA 1: Se estou no subsolo, a superfície não existe
                 if (currentFloor < 0 && f >= 0) {
                     continue;
                 }
                 
-                // REGRA 2: Se estou na superfície, o subsolo está enterrado
                 if (currentFloor >= 0 && f < 0) {
                     continue;
                 }
