@@ -82,33 +82,87 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.stroke();
 }
 
-// ATUALIZADO: Trava de Sustentação separada para Pisos e Colunas
+// NOVA FUNÇÃO: Radar para detectar se um espaço no andar de baixo está cercado por paredes (Cômodo fechado)
+function isEnclosed(fIndex, startRow, startCol) {
+    const fMap = mapData[fIndex];
+    if (!fMap) return false;
+
+    const queue = [{r: startRow, c: startCol}];
+    const visited = new Set();
+    visited.add(`${startRow},${startCol}`);
+
+    while (queue.length > 0) {
+        const {r, c} = queue.shift();
+
+        // Se bater numa parede diagonal, ela também serve de barreira
+        if (fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0) {
+            continue;
+        }
+
+        // Verifica a Esquerda (Noroeste)
+        if (fMap[r][c].wallL === 0) {
+            if (c === 0) return false; // Vazou do mapa (não é fechado)
+            if (!visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
+        }
+        // Verifica a Direita (Sudeste)
+        if (c === 9) return false; 
+        else if (fMap[r][c+1].wallL === 0) {
+            if (!visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
+        }
+        // Verifica Acima (Nordeste)
+        if (fMap[r][c].wallR === 0) {
+            if (r === 0) return false;
+            if (!visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
+        }
+        // Verifica Abaixo (Sudoeste)
+        if (r === 9) return false;
+        else if (fMap[r+1][c].wallR === 0) {
+            if (!visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+        }
+    }
+    return true; // Se a varredura não vazou, é um cômodo fechado perfeito!
+}
+
+// ATUALIZADO: Agora aceita cômodos fechados inferiores como fundação natural para a laje
 function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
-    const lowerBlock = mapData[currentFloor - 1][r][c];
-    return lowerBlock.floor > 0 || lowerBlock.column === 1;
+    const lower = mapData[currentFloor - 1][r][c];
+    
+    // 1. Tem piso ou coluna embaixo?
+    if (lower.floor > 0 || lower.column === 1) return true;
+    
+    // 2. Tem alguma parede servindo de apoio direto?
+    if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
+    if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
+    if (r < 9 && mapData[currentFloor-1][r+1][c].wallR > 0) return true;
+
+    // 3. Está dentro de um cômodo fechado lá embaixo?
+    if (isEnclosed(currentFloor - 1, r, c)) return true;
+
+    return false;
 }
 
-// NOVO: Trava de Sustentação dedicada para Paredes
+// ATUALIZADO: Agora aceita cômodos fechados inferiores para construir paredes internas na laje
 function isWallSupported(r, c, side) {
     if (currentFloor <= 0) return true;
     if (!mapData[currentFloor - 1]) return false;
 
     const lower = mapData[currentFloor - 1][r][c];
 
-    // 1. A parede superior empilha perfeitamente na parede inferior?
     if (side === 'L' && lower.wallL > 0) return true;
     if (side === 'R' && lower.wallR > 0) return true;
     if (side === 'WE' && lower.wallWE > 0) return true;
     if (side === 'NS' && lower.wallNS > 0) return true;
 
-    // 2. O bloco atual tem chão ou coluna debaixo dessa parede?
     if (lower.floor > 0 || lower.column === 1) return true;
 
-    // 3. O bloco vizinho (que compartilha essa borda) tem chão ou coluna?
     if (side === 'L' && c > 0 && (mapData[currentFloor - 1][r][c - 1].floor > 0 || mapData[currentFloor - 1][r][c - 1].column === 1)) return true;
     if (side === 'R' && r > 0 && (mapData[currentFloor - 1][r - 1][c].floor > 0 || mapData[currentFloor - 1][r - 1][c].column === 1)) return true;
+
+    if (isEnclosed(currentFloor - 1, r, c)) return true;
+    if (side === 'L' && c > 0 && isEnclosed(currentFloor - 1, r, c - 1)) return true;
+    if (side === 'R' && r > 0 && isEnclosed(currentFloor - 1, r - 1, c)) return true;
 
     return false;
 }
@@ -356,13 +410,12 @@ function updatePreview() {
         }
     }
 
-    // ATUALIZADO: Agora usa isWallSupported para não apagar paredes válidas
     if (!currentEraseMode) {
         previewWalls = previewWalls.filter(p => isWallSupported(p.row, p.col, p.side));
     }
 }
 
-function renderLayer(targetMap, isGhost, activeEraseMode = false) {
+function renderLayer(targetMap, isGhost, activeEraseMode = false, applyCutaway = false) {
     const showActiveTools = !isGhost;
 
     for (let row = 0; row < 10; row++) {
@@ -396,7 +449,6 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.2)' : '#555'; 
             ctx.stroke();
 
-            // PREVIEW DE PISO
             if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
                 const supp = isFloorSupported(row, col);
                 const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
@@ -421,24 +473,24 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             }
 
             let hL = targetMap[row][col].wallL;
-            if (isCutaway && hL > 0) hL = cutawayHeight;
+            if (applyCutaway && hL > 0) hL = cutawayHeight;
             let hR = targetMap[row][col].wallR;
-            if (isCutaway && hR > 0) hR = cutawayHeight;
+            if (applyCutaway && hR > 0) hR = cutawayHeight;
 
             if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
             if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
 
             let hWE = targetMap[row][col].wallWE;
-            if (isCutaway && hWE > 0) hWE = cutawayHeight;
+            if (applyCutaway && hWE > 0) hWE = cutawayHeight;
             let hNS = targetMap[row][col].wallNS;
-            if (isCutaway && hNS > 0) hNS = cutawayHeight;
+            if (applyCutaway && hNS > 0) hNS = cutawayHeight;
 
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
 
             if (targetMap[row][col].column === 1) {
                 let colH = blockHeight;
-                if (isCutaway) colH = cutawayHeight;
+                if (applyCutaway) colH = cutawayHeight;
                 const cx = pNorte.x;
                 const cy = pNorte.y + (tileHeight / 2);
                 
@@ -463,7 +515,7 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
                 const supp = isFloorSupported(row, col);
                 let colH = blockHeight;
-                if (isCutaway) colH = cutawayHeight;
+                if (applyCutaway) colH = cutawayHeight;
                 const cx = pNorte.x;
                 const cy = pNorte.y + (tileHeight / 2);
                 
@@ -484,7 +536,7 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
                     
                     ghosts.forEach(p => {
                         let hGhost = blockHeight;
-                        if (isCutaway) hGhost = cutawayHeight;
+                        if (applyCutaway) hGhost = cutawayHeight;
 
                         if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
                         else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
@@ -510,13 +562,13 @@ function drawIsometricGrid() {
             ctx.save();
             const distance = currentFloor - f;
             ctx.translate(0, distance * levelHeight); 
-            renderLayer(mapData[f], true);
+            renderLayer(mapData[f], true, false, false); 
             ctx.restore();
         }
     }
 
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
-    renderLayer(map, false, currentEraseMode);
+    renderLayer(map, false, currentEraseMode, isCutaway);
 
     ctx.restore();
 }
