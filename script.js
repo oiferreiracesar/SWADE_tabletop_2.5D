@@ -12,6 +12,10 @@ const levelHeight = 48;
 let blockHeight = 48; 
 const cutawayHeight = 12; 
 
+// NOVAS VARIÁVEIS DE CENÁRIO (BIOMAS)
+let surfaceColor = '#1e293b'; // Azul escuro atmosférico (Superfície)
+let undergroundColor = '#0a0705'; // Vazio abissal escuro (Subsolo)
+
 let hoverCol = -1;
 let hoverRow = -1;
 let hoverQuadrant = 'none';
@@ -438,7 +442,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (currentFloor === 0) {
             shouldDrawGrid = true; 
         } else if (currentFloor < 0) {
-            shouldDrawGrid = true; // Subsolo sempre precisa de grade
+            shouldDrawGrid = true; 
         } else {
             const supp = isFloorSupported(row, col);
             shouldDrawGrid = hasContent || supp; 
@@ -449,7 +453,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         shouldDrawGrid = false;
     }
 
-    // NOVA REGRA DA "TERRA SÓLIDA": Se estivermos no subsolo e o espaço não foi "escavado", vira terra.
     let isDirt = false;
     if (fIndex === currentFloor && fIndex < 0) {
         if (targetMap[row][col].floor === 0 && !isEnclosed(fIndex, row, col)) {
@@ -458,7 +461,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     }
 
     if (isDirt) {
-        ctx.fillStyle = '#1e140f'; // Cor da terra maciça
+        ctx.fillStyle = '#1e140f'; 
         ctx.beginPath();
         ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
         ctx.closePath();
@@ -485,7 +488,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath();
         ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
         ctx.closePath();
-        // Linhas mais escuras na terra para parecer uma matriz de solo
         ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); 
         ctx.stroke();
     }
@@ -592,7 +594,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 }
 
 function drawIsometricGrid() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // ATUALIZADO: Pintando o fundo atmosférico
+    ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
     ctx.save();
     
     ctx.translate(originX, originY);
@@ -604,7 +609,6 @@ function drawIsometricGrid() {
         for (let col = 0; col < 10; col++) {
             
             for (const f of floors) {
-                // NOVA REGRA DE FATIAMENTO DE TETO PARA DUNGEONS
                 if (currentFloor < 0 && f >= 0) {
                     continue;
                 }
