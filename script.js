@@ -416,14 +416,12 @@ function updatePreview() {
     }
 }
 
-// NOVA FUNÇÃO CIRÚRGICA: Z-Sorting e Renderização por Célula
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
 
     ctx.save();
     
-    // Translação 3D calculada por andar de forma universal
     const distance = fIndex - currentFloor;
     ctx.translate(0, -distance * levelHeight);
 
@@ -442,6 +440,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             const supp = isFloorSupported(row, col);
             shouldDrawGrid = hasContent || supp;
         }
+    }
+
+    // NOVA REGRA: Oculta a grade vazia em todos os andares se o modo Paredes Inteiras estiver ativo
+    if (!isCutaway && !hasContent) {
+        shouldDrawGrid = false;
     }
 
     if (targetMap[row][col].floor > 0) {
@@ -571,7 +574,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     ctx.restore();
 }
 
-// O NOVO CORAÇÃO GRÁFICO: Mascaramento Dinâmico COM Z-Sorting Físico (Cell by Cell)
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
@@ -584,17 +586,13 @@ function drawIsometricGrid() {
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             
-            // Desenha a célula para todos os andares empilhando de baixo para cima perfeitamente
             for (const f of floors) {
-                // 1. Fundação
                 if (f < currentFloor) {
                     renderCell(row, col, f, true, false, false, false);
                 } 
-                // 2. Andar Atual
                 else if (f === currentFloor) {
                     renderCell(row, col, f, false, currentEraseMode, isCutaway, true);
                 } 
-                // 3. O TETO ESQUECIDO (Agora simula o The Sims!)
                 else if (f > currentFloor && !isCutaway) {
                     renderCell(row, col, f, false, false, false, false);
                 }
