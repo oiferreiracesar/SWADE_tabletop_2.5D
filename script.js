@@ -8,7 +8,6 @@ const tileHeight = 32;
 const originX = canvas.width / 2;
 const originY = 100;
 
-// NOVO: Distância vertical exata entre os andares (Empilhamento 3D)
 const levelHeight = 48; 
 let blockHeight = 48; 
 const cutawayHeight = 12; 
@@ -34,7 +33,8 @@ function createEmptyMap() {
     for (let i = 0; i < 10; i++) {
         newMap[i] = [];
         for (let j = 0; j < 10; j++) {
-            newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0 }; 
+            // ATUALIZADO: Propriedade 'column' adicionada na fundação da matriz
+            newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0 }; 
         }
     }
     return newMap;
@@ -81,6 +81,14 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.strokeStyle = '#222'; 
     ctx.lineWidth = 1;
     ctx.stroke();
+}
+
+// NOVA TRAVA DE FÍSICA: Verifica se o bloco de baixo tem piso ou coluna
+function isSupported(r, c) {
+    if (currentFloor <= 0) return true; // Térreo e subsolo sempre têm sustentação da terra
+    if (!mapData[currentFloor - 1]) return false;
+    const lowerBlock = mapData[currentFloor - 1][r][c];
+    return lowerBlock.floor > 0 || lowerBlock.column === 1;
 }
 
 function getTargetEdge(hRow, hCol, hQuad) {
@@ -142,6 +150,9 @@ function updateFloorState(r, c, incomingType, eraseMode) {
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
     
+    // Trava do preenchimento: Se tentar preencher no vazio, aborta.
+    if (paintMode === 1 && !isSupported(startRow, startCol)) return;
+    
     const startType = getFloorType(startRow, startCol, 'CLICK', startQuad);
     const queue = [{r: startRow, c: startCol, type: startType}];
     const visited = new Set();
@@ -162,24 +173,32 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
         const canSE = [1, 3, 5].includes(type);
 
         if (canNW && c > 0 && map[r][c].wallL === 0 && !visited.has(`${r},${c-1}`)) {
-            const nextType = getFloorType(r, c-1, 'SE');
-            visited.add(`${r},${c-1}`);
-            queue.push({r, c: c-1, type: nextType});
+            if (paintMode === 0 || isSupported(r, c-1)) {
+                const nextType = getFloorType(r, c-1, 'SE');
+                visited.add(`${r},${c-1}`);
+                queue.push({r, c: c-1, type: nextType});
+            }
         }
         if (canSE && c < 9 && map[r][c+1].wallL === 0 && !visited.has(`${r},${c+1}`)) {
-            const nextType = getFloorType(r, c+1, 'NW');
-            visited.add(`${r},${c+1}`);
-            queue.push({r, c: c+1, type: nextType});
+            if (paintMode === 0 || isSupported(r, c+1)) {
+                const nextType = getFloorType(r, c+1, 'NW');
+                visited.add(`${r},${c+1}`);
+                queue.push({r, c: c+1, type: nextType});
+            }
         }
         if (canNE && r > 0 && map[r][c].wallR === 0 && !visited.has(`${r-1},${c}`)) {
-            const nextType = getFloorType(r-1, c, 'SW');
-            visited.add(`${r-1},${c}`);
-            queue.push({r: r-1, c, type: nextType});
+            if (paintMode === 0 || isSupported(r-1, c)) {
+                const nextType = getFloorType(r-1, c, 'SW');
+                visited.add(`${r-1},${c}`);
+                queue.push({r: r-1, c, type: nextType});
+            }
         }
         if (canSW && r < 9 && map[r+1][c].wallR === 0 && !visited.has(`${r+1},${c}`)) {
-            const nextType = getFloorType(r+1, c, 'NE');
-            visited.add(`${r+1},${c}`);
-            queue.push({r: r+1, c, type: nextType});
+            if (paintMode === 0 || isSupported(r+1, c)) {
+                const nextType = getFloorType(r+1, c, 'NE');
+                visited.add(`${r+1},${c}`);
+                queue.push({r: r+1, c, type: nextType});
+            }
         }
     }
 }
@@ -315,6 +334,11 @@ function updatePreview() {
             if (hoverCol + 1 < 10) previewWalls.push({ row: hoverRow, col: hoverCol + 1, side: 'L' });
         }
     }
+
+    // Trava de Segurança na Pré-visualização de Paredes: Apaga o fantasma de paredes sem apoio
+    if (!currentEraseMode) {
+        previewWalls = previewWalls.filter(p => isSupported(p.row, p.col));
+    }
 }
 
 function renderLayer(targetMap, isGhost, activeEraseMode = false) {
@@ -327,6 +351,7 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
 
+            // DESENHO DO PISO
             if (targetMap[row][col].floor > 0) {
                 ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
                 ctx.beginPath();
@@ -351,7 +376,9 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
             ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.2)' : '#555'; 
             ctx.stroke();
 
-            if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging) {
+            // PREVIEW DE PISO COM TRAVA DE SEGURANÇA
+            if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+                const supp = isSupported(row, col);
                 const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
                 ctx.beginPath();
                 if (previewType === 1) { 
@@ -367,12 +394,13 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
                 }
                 ctx.closePath();
                 
-                if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
-                else if (currentBrush === 1) ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
-                else ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)'; // Indica BLOQUEADO (Vermelho)
+                else if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+                else ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
                 ctx.fill();
             }
 
+            // DESENHO DE PAREDES
             let hL = targetMap[row][col].wallL;
             if (isCutaway && hL > 0) hL = cutawayHeight;
             let hR = targetMap[row][col].wallR;
@@ -388,6 +416,51 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
 
             if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
             if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
+
+            // NOVO: DESENHO DA COLUNA (Pilar 3D no centro do losango)
+            if (targetMap[row][col].column === 1) {
+                let colH = blockHeight;
+                if (isCutaway) colH = cutawayHeight;
+                const cx = pNorte.x;
+                const cy = pNorte.y + (tileHeight / 2);
+                
+                ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3';
+                ctx.strokeStyle = isGhost ? 'transparent' : '#555';
+                
+                // Topo da coluna
+                ctx.beginPath();
+                ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+                
+                // Face esquerda da coluna
+                ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
+                ctx.beginPath();
+                ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+                
+                // Face direita da coluna
+                ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
+                ctx.beginPath();
+                ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+            }
+
+            // PREVIEW FANTASMA DE COLUNA (HOVER DA FERRAMENTA 6)
+            if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+                const supp = isSupported(row, col);
+                let colH = blockHeight;
+                if (isCutaway) colH = cutawayHeight;
+                const cx = pNorte.x;
+                const cy = pNorte.y + (tileHeight / 2);
+                
+                let ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+                if (!supp && !activeEraseMode) ghostColor = 'rgba(255, 50, 50, 0.4)'; // Bloqueado
+                
+                ctx.fillStyle = ghostColor;
+                ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
+            }
 
             if (showActiveTools) {
                 const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
@@ -411,27 +484,23 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false) {
     }
 }
 
-// ATUALIZADO: Motor de Pilha 3D.
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     
     ctx.translate(originX, originY);
 
-    // 1. Desenha TODOS os andares ABAIXO do atual, do mais fundo pro mais raso
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     for (const f of floors) {
         if (f < currentFloor) {
             ctx.save();
             const distance = currentFloor - f;
-            // Desloca fisicamente para baixo na tela (48 pixels por andar)
             ctx.translate(0, distance * levelHeight); 
             renderLayer(mapData[f], true);
             ctx.restore();
         }
     }
 
-    // 2. Desenha o andar ATUAL no topo (Ancorado no originY original)
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
     renderLayer(map, false, currentEraseMode);
 
@@ -443,10 +512,19 @@ function applySmartBrush() {
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 1) { 
+        if (!currentEraseMode && !isSupported(hoverRow, hoverCol)) return;
         const type = getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant);
         map[hoverRow][hoverCol].floor = updateFloorState(hoverRow, hoverCol, type, currentEraseMode); 
         return; 
     }
+    
+    // ATUALIZADO: Ferramenta de Coluna
+    if (currentBrush === 6) {
+        if (!currentEraseMode && !isSupported(hoverRow, hoverCol)) return;
+        map[hoverRow][hoverCol].column = currentEraseMode ? 0 : 1;
+        return;
+    }
+
     if (currentEraseMode && isDragging && dragStartNode && dragStartNode.type === 'floor') {
         const type = getFloorType(hoverRow, hoverCol, 'CLICK', hoverQuadrant);
         map[hoverRow][hoverCol].floor = updateFloorState(hoverRow, hoverCol, type, true);
@@ -459,6 +537,8 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
     if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
+        if (!currentEraseMode && !isSupported(tRow, tCol)) return;
+
         if (currentEraseMode) {
             if (side === 'L') map[tRow][tCol].wallL = 0;
             if (side === 'R') map[tRow][tCol].wallR = 0;
@@ -490,6 +570,7 @@ function updateUI() {
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
     document.getElementById('btnRoomOct').classList.toggle('active', currentBrush === 5 && !isErasing);
+    document.getElementById('btnColuna').classList.toggle('active', currentBrush === 6 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
@@ -539,7 +620,7 @@ canvas.addEventListener('mousemove', (e) => {
     ctx.restore();
 
     if (isDragging) {
-        if (currentBrush === 1 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+        if (currentBrush === 1 || currentBrush === 6 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -563,8 +644,8 @@ canvas.addEventListener('mousedown', (e) => {
 
     isDragging = true; 
     
-    if (currentBrush === 1) {
-        dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
+    if (currentBrush === 1 || currentBrush === 6) {
+        dragStartNode = { type: currentBrush === 1 ? 'floor' : 'column', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
     } else if ([3, 4, 5].includes(currentBrush)) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
@@ -655,7 +736,7 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2','3','4','5'].includes(e.key)) {
+    if (['1','2','3','4','5','6'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
@@ -682,6 +763,7 @@ document.getElementById('btnParede').addEventListener('click', () => { currentBr
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
 document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
+document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
 
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
