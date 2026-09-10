@@ -23,30 +23,34 @@ let isCutaway = true;
 let mapHistory = [];
 let isErasing = false;
 
-const map = [];
-for (let i = 0; i < 10; i++) {
-    map[i] = [];
-    for (let j = 0; j < 10; j++) {
-        map[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0 }; 
+// NOVO: Gerenciador de andares
+let currentFloor = 0;
+let mapData = {};
+let map; // Ponteiro dinâmico para o andar atual
+
+function createEmptyMap() {
+    const newMap = [];
+    for (let i = 0; i < 10; i++) {
+        newMap[i] = [];
+        for (let j = 0; j < 10; j++) {
+            newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0 }; 
+        }
     }
+    return newMap;
 }
+
+// Inicializa o Térreo (Andar 0)
+mapData[0] = createEmptyMap();
+map = mapData[0];
 
 document.addEventListener('contextmenu', e => e.preventDefault());
 
+// ATUALIZADO: Salva o prédio inteiro e qual andar o jogador está olhando
 function saveState() {
-    const snapshot = [];
-    for (let i = 0; i < 10; i++) {
-        snapshot[i] = [];
-        for (let j = 0; j < 10; j++) {
-            snapshot[i][j] = { 
-                floor: map[i][j].floor, 
-                wallL: map[i][j].wallL, 
-                wallR: map[i][j].wallR,
-                wallWE: map[i][j].wallWE,
-                wallNS: map[i][j].wallNS
-            };
-        }
-    }
+    const snapshot = {
+        floor: currentFloor,
+        data: JSON.parse(JSON.stringify(mapData)) // Clone profundo para segurança total
+    };
     mapHistory.push(snapshot);
     if (mapHistory.length > 30) mapHistory.shift();
 }
@@ -282,7 +286,6 @@ function updatePreview() {
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'WE' });
         }
     }
-    // NOVA MÁQUINA: Sala Octogonal (5)
     else if (currentBrush === 5 || (currentEraseMode && currentBrush === 5)) {
         if (isDragging && dragStartNode && dragStartNode.type === 'room') {
             const minR = Math.min(dragStartNode.row, hoverRow);
@@ -290,21 +293,17 @@ function updatePreview() {
             const minC = Math.min(dragStartNode.col, hoverCol);
             const maxC = Math.max(dragStartNode.col, hoverCol);
 
-            // Exige no mínimo uma área de 2x2 para conseguir cortar os 4 cantos
             if (maxR - minR >= 1 && maxC - minC >= 1) {
-                // As 4 quinas cortadas pelas diagonais
                 if (minR < 10 && minC < 10) previewWalls.push({ row: minR, col: minC, side: 'WE' }); 
                 if (maxR < 10 && maxC < 10) previewWalls.push({ row: maxR, col: maxC, side: 'WE' }); 
                 if (maxR < 10 && minC < 10) previewWalls.push({ row: maxR, col: minC, side: 'NS' }); 
                 if (minR < 10 && maxC < 10) previewWalls.push({ row: minR, col: maxC, side: 'NS' }); 
                 
-                // Conexões retas das paredes laterais (só são desenhadas se o bloco for 3x3 ou maior)
-                for (let r = minR + 1; r <= maxR - 1; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' }); // Aresta Noroeste
-                for (let r = minR + 1; r <= maxR - 1; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' }); // Aresta Sudeste
-                for (let c = minC + 1; c <= maxC - 1; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' }); // Aresta Nordeste
-                for (let c = minC + 1; c <= maxC - 1; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' }); // Aresta Sudoeste
+                for (let r = minR + 1; r <= maxR - 1; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' }); 
+                for (let r = minR + 1; r <= maxR - 1; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' }); 
+                for (let c = minC + 1; c <= maxC - 1; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' }); 
+                for (let c = minC + 1; c <= maxC - 1; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' }); 
             } else {
-                // Fallback de segurança: Se a área for muito pequena (1x1), vira um quadrado.
                 for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
                 for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
                 for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
@@ -455,15 +454,36 @@ function applySmartBrush() {
     }
 }
 
+// NOVO: Função para alterar de andar e sincronizar o motor
+function changeFloor(delta) {
+    saveState(); // Salva o prédio atual para permitir Ctrl+Z da navegação
+    currentFloor += delta;
+    
+    // Se o andar visitado for novo, cria um chão vazio para ele
+    if (!mapData[currentFloor]) {
+        mapData[currentFloor] = createEmptyMap();
+    }
+    
+    // O ponteiro 'map' passa a apontar para a nova matriz
+    map = mapData[currentFloor];
+    
+    updateUI();
+    updatePreview();
+    drawIsometricGrid();
+}
+
 function updateUI() {
     document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
-    // ATUALIZADO: Ferramenta 5 ativa na interface
     document.getElementById('btnRoomOct').classList.toggle('active', currentBrush === 5 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
+
+    // ATUALIZADO: Renderiza o texto correto do andar atual no menu HTML
+    let floorName = currentFloor === 0 ? "Térreo (0)" : (currentFloor > 0 ? `Superior (${currentFloor})` : `Subsolo (${currentFloor})`);
+    document.getElementById('floorLabel').innerText = `Andar Atual: ${floorName}`;
 }
 
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
@@ -535,7 +555,6 @@ canvas.addEventListener('mousedown', (e) => {
     if (currentBrush === 1) {
         dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
-    // ATUALIZADO: Ferramenta 5 aciona a lógica de arrasto de cômodos
     } else if ([3, 4, 5].includes(currentBrush)) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
@@ -554,7 +573,6 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         const eraseMode = dragStartNode.erase;
-        // ATUALIZADO: Salva paredes geradas pela ferramenta 5
         if ([2, 3, 4, 5].includes(currentBrush) && !eraseMode) {
             saveState(); 
             previewWalls.forEach(p => {
@@ -614,23 +632,19 @@ window.addEventListener('keydown', (e) => {
         document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
         setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
 
+        // ATUALIZADO: Carrega não apenas o desenho, mas todos os andares e foca no andar correto
         if (mapHistory.length > 0) {
             const previousState = mapHistory.pop();
-            for (let r = 0; r < 10; r++) {
-                for (let c = 0; c < 10; c++) {
-                    map[r][c].floor = previousState[r][c].floor;
-                    map[r][c].wallL = previousState[r][c].wallL;
-                    map[r][c].wallR = previousState[r][c].wallR;
-                    map[r][c].wallWE = previousState[r][c].wallWE;
-                    map[r][c].wallNS = previousState[r][c].wallNS;
-                }
-            }
+            currentFloor = previousState.floor;
+            mapData = JSON.parse(JSON.stringify(previousState.data));
+            map = mapData[currentFloor];
+            
+            updateUI();
             drawIsometricGrid();
         }
         return;
     }
 
-    // ATUALIZADO: Tecla 5 ativa a nova ferramenta
     if (['1','2','3','4','5'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
@@ -650,11 +664,14 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
+// LIGAÇÃO DOS NOVOS BOTÕES DO HTML
+document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
+document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
+
 document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
-// ATUALIZADO: Clique no novo botão HTML
 document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
 
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
