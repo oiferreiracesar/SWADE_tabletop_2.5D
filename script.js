@@ -15,6 +15,7 @@ const cutawayHeight = 12;
 let surfaceColor = '#1e293b'; 
 let undergroundColor = '#0a0705'; 
 let dirtColor = '#1e140f'; 
+let roofColor = '#475569'; // Cinza ardósia padrão
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -157,6 +158,21 @@ function isWallSupported(r, c, side) {
     if (side === 'L' && c > 0 && isEnclosed(currentFloor - 1, r, c - 1)) return true;
     if (side === 'R' && r > 0 && isEnclosed(currentFloor - 1, r - 1, c)) return true;
 
+    return false;
+}
+
+// NOVA FUNÇÃO: O Radar Vertical que detecta se há construção acima
+function hasStructureAbove(fIndex, r, c) {
+    const upper = mapData[fIndex + 1];
+    if (!upper) return false;
+    const cell = upper[r][c];
+    
+    // Se tem chão, parede ou coluna em cima, o telhado não deve ser gerado.
+    if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
+    
+    // Se o andar de cima tem uma sala fechada naquele quadrado, também inibe o telhado.
+    if (isEnclosed(fIndex + 1, r, c)) return true;
+    
     return false;
 }
 
@@ -490,7 +506,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.stroke();
     }
 
-    // DESBLOQUEADO: A visualização do piso verde/vermelho antes de clicar nunca será oculta
     if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
         const supp = isFloorSupported(row, col);
         const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
@@ -554,7 +569,45 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // DESBLOQUEADO: A visualização do pincel de coluna
+    // O NOVO GERADOR DE TELHADO (Bounding Box Procedural Generation)
+    // Regra: Não está CORTADA E está num cômodo fechado E não tem andares em cima dele
+    if (!isCutaway && fIndex >= 0 && isEnclosed(fIndex, row, col) && !hasStructureAbove(fIndex, row, col)) {
+        let rH = 24; // Altura da pirâmide do telhado
+        
+        // As 4 pontas no topo da parede
+        let c_pN = {x: pNorte.x, y: pNorte.y - blockHeight};
+        let c_pE = {x: pLeste.x, y: pLeste.y - blockHeight};
+        let c_pS = {x: pSul.x, y: pSul.y - blockHeight};
+        let c_pW = {x: pOeste.x, y: pOeste.y - blockHeight};
+        
+        // O cume (pico) do telhado no centro do bloco
+        let peak = {x: pNorte.x, y: pNorte.y + (tileHeight / 2) - blockHeight - rH};
+
+        // Função de desenho de triângulos do telhado com sombreamento fixo para 3D
+        const drawTri = (p1, p2, p3, overlay) => {
+            ctx.fillStyle = roofColor;
+            ctx.beginPath(); 
+            ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); 
+            ctx.closePath(); 
+            ctx.fill();
+            
+            // Camada de Luz/Sombra
+            ctx.fillStyle = overlay; 
+            ctx.fill();
+            
+            // Contorno sutil para textura das telhas
+            ctx.strokeStyle = 'rgba(0,0,0,0.15)'; 
+            ctx.lineWidth = 1; 
+            ctx.stroke();
+        };
+
+        // Renderiza de trás pra frente (Z-Sorting das faces)
+        drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); // Noroeste (Sombreado)
+        drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); // Nordeste (Suave)
+        drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); // Sudoeste (Iluminado)
+        drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); // Sudeste (Sombra pesada)
+    }
+
     if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
@@ -571,7 +624,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    // DESBLOQUEADO: A visualização (Landing Pad) do pincel de paredes fantasma 
     if (showActiveTools) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
@@ -722,6 +774,10 @@ document.getElementById('colorUnderground').addEventListener('input', (e) => {
 });
 document.getElementById('colorDirt').addEventListener('input', (e) => {
     dirtColor = e.target.value;
+    drawIsometricGrid();
+});
+document.getElementById('colorRoof').addEventListener('input', (e) => {
+    roofColor = e.target.value;
     drawIsometricGrid();
 });
 
