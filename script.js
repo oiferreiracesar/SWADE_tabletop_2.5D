@@ -438,7 +438,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     
     let shouldDrawGrid = false;
 
-    // ATUALIZADO: A grade segue puramente as regras de Z-Sorting (Profundidade)
     if (fIndex === currentFloor) {
         if (currentFloor <= 0) {
             shouldDrawGrid = true; 
@@ -491,6 +490,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.stroke();
     }
 
+    // DESBLOQUEADO: A visualização do piso verde/vermelho antes de clicar nunca será oculta
     if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
         const supp = isFloorSupported(row, col);
         const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
@@ -554,7 +554,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    if (showActiveTools && isCutaway && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+    // DESBLOQUEADO: A visualização do pincel de coluna
+    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
         let colH = blockHeight;
         if (applyCutaway) colH = cutawayHeight;
@@ -570,7 +571,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools && isCutaway) {
+    // DESBLOQUEADO: A visualização (Landing Pad) do pincel de paredes fantasma 
+    if (showActiveTools) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
