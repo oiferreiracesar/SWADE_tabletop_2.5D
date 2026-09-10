@@ -117,27 +117,22 @@ function isEnclosed(fIndex, startRow, startCol) {
     return true; 
 }
 
-// ATUALIZADO: Chão verde no térreo não atua mais como base estrutural
 function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
     const lower = mapData[currentFloor - 1][r][c];
     
-    // Suporte restrito a Coluna sólida
     if (lower.column === 1) return true;
     
-    // Suporte restrito a Paredes ativas embaixo
     if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
     if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
     if (r < 9 && mapData[currentFloor-1][r+1][c].wallR > 0) return true;
 
-    // Suporte restrito a estar contido em cômodo fechado
     if (isEnclosed(currentFloor - 1, r, c)) return true;
 
     return false;
 }
 
-// ATUALIZADO: Chão verde no térreo não autoriza paredes a flutuarem
 function isWallSupported(r, c, side) {
     if (currentFloor <= 0) return true;
     if (!mapData[currentFloor - 1]) return false;
@@ -421,8 +416,10 @@ function updatePreview() {
     }
 }
 
-function renderLayer(targetMap, isGhost, activeEraseMode = false, applyCutaway = false) {
+// ATUALIZADO: Agora a função recebe o fIndex em vez do targetMap solto
+function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = false) {
     const showActiveTools = !isGhost;
+    const targetMap = mapData[fIndex];
 
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
@@ -430,6 +427,23 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false, applyCutaway =
             const pLeste = gridToScreen(row, col + 1);
             const pSul   = gridToScreen(row + 1, col + 1);
             const pOeste = gridToScreen(row + 1, col);
+
+            // NOVO: Regra de Mascaramento do Grid (Não consome draw calls no vazio)
+            const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+            let shouldDrawGrid = true;
+            
+            if (isGhost) {
+                // Se for um andar fantasma (ex: vendo o térreo estando no andar 1)
+                // Ocultamos a malha cinza se o bloco estiver totalmente vazio para não poluir
+                shouldDrawGrid = hasContent;
+            } else {
+                // Se for o andar ativo (onde o mouse está trabalhando)
+                if (fIndex > 0) {
+                    // Nos andares superiores, o grid VAZIO só aparece se tiver SUPORTE por baixo
+                    const supp = isFloorSupported(row, col);
+                    shouldDrawGrid = hasContent || supp;
+                }
+            }
 
             if (targetMap[row][col].floor > 0) {
                 ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
@@ -449,11 +463,14 @@ function renderLayer(targetMap, isGhost, activeEraseMode = false, applyCutaway =
                 ctx.fill(); 
             }
             
-            ctx.beginPath();
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
-            ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.2)' : '#555'; 
-            ctx.stroke();
+            // ATUALIZADO: Desenha a linha de grade respeitando a trava de visibilidade do documento
+            if (shouldDrawGrid) {
+                ctx.beginPath();
+                ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+                ctx.closePath();
+                ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'; 
+                ctx.stroke();
+            }
 
             if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
                 const supp = isFloorSupported(row, col);
@@ -568,13 +585,15 @@ function drawIsometricGrid() {
             ctx.save();
             const distance = currentFloor - f;
             ctx.translate(0, distance * levelHeight); 
-            renderLayer(mapData[f], true, false, false); 
+            // ATUALIZADO: Passa f (o index) em vez do mapa solto
+            renderLayer(f, true, false, false); 
             ctx.restore();
         }
     }
 
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
-    renderLayer(map, false, currentEraseMode, isCutaway);
+    // ATUALIZADO: Passa currentFloor
+    renderLayer(currentFloor, false, currentEraseMode, isCutaway);
 
     ctx.restore();
 }
