@@ -416,160 +416,162 @@ function updatePreview() {
     }
 }
 
-// ATUALIZADO: Assinatura blindada. showActiveTools foi isolado.
-function renderLayer(fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
+// NOVA FUNÇÃO CIRÚRGICA: Z-Sorting e Renderização por Célula
+function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
     const targetMap = mapData[fIndex];
+    if (!targetMap || !targetMap[row]) return;
 
-    for (let row = 0; row < 10; row++) {
-        for (let col = 0; col < 10; col++) {
-            const pNorte = gridToScreen(row, col);
-            const pLeste = gridToScreen(row, col + 1);
-            const pSul   = gridToScreen(row + 1, col + 1);
-            const pOeste = gridToScreen(row + 1, col);
+    ctx.save();
+    
+    // Translação 3D calculada por andar de forma universal
+    const distance = fIndex - currentFloor;
+    ctx.translate(0, -distance * levelHeight);
 
-            // NOVO: Regra de Mascaramento do Grid Base (não desenha linhas inúteis)
-            const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
-            let shouldDrawGrid = true;
-            
-            if (!showActiveTools) {
-                // Se for um andar de fundo (inferior) ou teto (superior), o grid só aparece se tiver estrutura ali
-                shouldDrawGrid = hasContent;
-            } else {
-                // No andar ativo de edição, mostra a célula vazia apenas se ela tiver suporte embaixo (permite clique)
-                if (fIndex > 0) {
-                    const supp = isFloorSupported(row, col);
-                    shouldDrawGrid = hasContent || supp;
-                }
-            }
+    const pNorte = gridToScreen(row, col);
+    const pLeste = gridToScreen(row, col + 1);
+    const pSul   = gridToScreen(row + 1, col + 1);
+    const pOeste = gridToScreen(row + 1, col);
 
-            if (targetMap[row][col].floor > 0) {
-                ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
-                ctx.beginPath();
-                if (targetMap[row][col].floor === 1) { 
-                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (targetMap[row][col].floor === 2) { 
-                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (targetMap[row][col].floor === 3) { 
-                    ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
-                } else if (targetMap[row][col].floor === 4) { 
-                    ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
-                } else if (targetMap[row][col].floor === 5) { 
-                    ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
-                }
-                ctx.closePath();
-                ctx.fill(); 
-            }
-            
-            if (shouldDrawGrid) {
-                ctx.beginPath();
-                ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-                ctx.closePath();
-                ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'; 
-                ctx.stroke();
-            }
-
-            if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
-                const supp = isFloorSupported(row, col);
-                const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
-                ctx.beginPath();
-                if (previewType === 1) { 
-                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (previewType === 2) { 
-                    ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
-                } else if (previewType === 3) { 
-                    ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
-                } else if (previewType === 4) { 
-                    ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
-                } else if (previewType === 5) { 
-                    ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
-                }
-                ctx.closePath();
-                
-                if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)';
-                else if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
-                else ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
-                ctx.fill();
-            }
-
-            let hL = targetMap[row][col].wallL;
-            if (applyCutaway && hL > 0) hL = cutawayHeight;
-            let hR = targetMap[row][col].wallR;
-            if (applyCutaway && hR > 0) hR = cutawayHeight;
-
-            if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
-            if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
-
-            let hWE = targetMap[row][col].wallWE;
-            if (applyCutaway && hWE > 0) hWE = cutawayHeight;
-            let hNS = targetMap[row][col].wallNS;
-            if (applyCutaway && hNS > 0) hNS = cutawayHeight;
-
-            if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
-            if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
-
-            if (targetMap[row][col].column === 1) {
-                let colH = blockHeight;
-                if (applyCutaway) colH = cutawayHeight;
-                const cx = pNorte.x;
-                const cy = pNorte.y + (tileHeight / 2);
-                
-                ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3';
-                ctx.strokeStyle = isGhost ? 'transparent' : '#555';
-                
-                ctx.beginPath();
-                ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH);
-                ctx.closePath(); ctx.fill(); ctx.stroke();
-                
-                ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
-                ctx.beginPath();
-                ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy);
-                ctx.closePath(); ctx.fill(); ctx.stroke();
-                
-                ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
-                ctx.beginPath();
-                ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4);
-                ctx.closePath(); ctx.fill(); ctx.stroke();
-            }
-
-            if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
-                const supp = isFloorSupported(row, col);
-                let colH = blockHeight;
-                if (applyCutaway) colH = cutawayHeight;
-                const cx = pNorte.x;
-                const cy = pNorte.y + (tileHeight / 2);
-                
-                let ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-                if (!supp && !activeEraseMode) ghostColor = 'rgba(255, 50, 50, 0.4)'; 
-                
-                ctx.fillStyle = ghostColor;
-                ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
-                ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill();
-                ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
-            }
-
-            if (showActiveTools) {
-                const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
-                if (ghosts.length > 0) {
-                    ctx.globalAlpha = 0.7;
-                    const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-                    
-                    ghosts.forEach(p => {
-                        let hGhost = blockHeight;
-                        if (applyCutaway) hGhost = cutawayHeight;
-
-                        if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
-                        else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
-                        else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
-                        else if (p.side === 'NS') drawFlatWall(pNorte, pSul, hGhost, ghostColor);
-                    });
-                    ctx.globalAlpha = 1.0;
-                }
-            }
+    const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+    let shouldDrawGrid = true;
+    
+    if (!showActiveTools) {
+        shouldDrawGrid = hasContent;
+    } else {
+        if (fIndex > 0) {
+            const supp = isFloorSupported(row, col);
+            shouldDrawGrid = hasContent || supp;
         }
     }
+
+    if (targetMap[row][col].floor > 0) {
+        ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
+        ctx.beginPath();
+        if (targetMap[row][col].floor === 1) { 
+            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+        } else if (targetMap[row][col].floor === 2) { 
+            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
+        } else if (targetMap[row][col].floor === 3) { 
+            ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
+        } else if (targetMap[row][col].floor === 4) { 
+            ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
+        } else if (targetMap[row][col].floor === 5) { 
+            ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
+        }
+        ctx.closePath();
+        ctx.fill(); 
+    }
+    
+    if (shouldDrawGrid) {
+        ctx.beginPath();
+        ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+        ctx.closePath();
+        ctx.strokeStyle = isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'; 
+        ctx.stroke();
+    }
+
+    if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+        const supp = isFloorSupported(row, col);
+        const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
+        ctx.beginPath();
+        if (previewType === 1) { 
+            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+        } else if (previewType === 2) { 
+            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
+        } else if (previewType === 3) { 
+            ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
+        } else if (previewType === 4) { 
+            ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
+        } else if (previewType === 5) { 
+            ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
+        }
+        ctx.closePath();
+        
+        if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)';
+        else if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+        else ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
+        ctx.fill();
+    }
+
+    let hL = targetMap[row][col].wallL;
+    if (applyCutaway && hL > 0) hL = cutawayHeight;
+    let hR = targetMap[row][col].wallR;
+    if (applyCutaway && hR > 0) hR = cutawayHeight;
+
+    if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
+    if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
+
+    let hWE = targetMap[row][col].wallWE;
+    if (applyCutaway && hWE > 0) hWE = cutawayHeight;
+    let hNS = targetMap[row][col].wallNS;
+    if (applyCutaway && hNS > 0) hNS = cutawayHeight;
+
+    if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
+    if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
+
+    if (targetMap[row][col].column === 1) {
+        let colH = blockHeight;
+        if (applyCutaway) colH = cutawayHeight;
+        const cx = pNorte.x;
+        const cy = pNorte.y + (tileHeight / 2);
+        
+        ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3';
+        ctx.strokeStyle = isGhost ? 'transparent' : '#555';
+        
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        
+        ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
+        ctx.beginPath();
+        ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        
+        ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+
+    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+        const supp = isFloorSupported(row, col);
+        let colH = blockHeight;
+        if (applyCutaway) colH = cutawayHeight;
+        const cx = pNorte.x;
+        const cy = pNorte.y + (tileHeight / 2);
+        
+        let ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+        if (!supp && !activeEraseMode) ghostColor = 'rgba(255, 50, 50, 0.4)'; 
+        
+        ctx.fillStyle = ghostColor;
+        ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
+    }
+
+    if (showActiveTools) {
+        const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
+        if (ghosts.length > 0) {
+            ctx.globalAlpha = 0.7;
+            const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+            
+            ghosts.forEach(p => {
+                let hGhost = blockHeight;
+                if (applyCutaway) hGhost = cutawayHeight;
+
+                if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
+                else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
+                else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
+                else if (p.side === 'NS') drawFlatWall(pNorte, pSul, hGhost, ghostColor);
+            });
+            ctx.globalAlpha = 1.0;
+        }
+    }
+
+    ctx.restore();
 }
 
-// ATUALIZADO: Motor Central de Z-Sorting e Mascaramento Dinâmico
+// O NOVO CORAÇÃO GRÁFICO: Mascaramento Dinâmico COM Z-Sorting Físico (Cell by Cell)
 function drawIsometricGrid() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
@@ -577,34 +579,27 @@ function drawIsometricGrid() {
     ctx.translate(originX, originY);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
-    
-    // 1. Renderiza a FUNDAÇÃO (Andares abaixo de você - Sempre fantasmas)
-    for (const f of floors) {
-        if (f < currentFloor) {
-            ctx.save();
-            const distance = currentFloor - f;
-            ctx.translate(0, distance * levelHeight); 
-            renderLayer(f, true, false, false, false); 
-            ctx.restore();
-        }
-    }
-
-    // 2. Renderiza o ANDAR ATUAL (Com mouse, edição e cor viva)
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
-    renderLayer(currentFloor, false, currentEraseMode, isCutaway, true);
 
-    // 3. Renderiza o TETO (Andares acima de você - Mascaramento Dinâmico)
-    // Regra: Se o Cutaway estiver ligado (para ver dentro da casa), nós MASCARAMOS (escondemos) o teto.
-    // Se o Cutaway estiver desligado (Paredes Inteiras), nós desenhamos os andares superiores por cima!
-    if (!isCutaway) {
-        for (const f of floors) {
-            if (f > currentFloor) {
-                ctx.save();
-                const distance = f - currentFloor;
-                ctx.translate(0, -distance * levelHeight); // Sobe na tela (Y negativo)
-                renderLayer(f, false, false, false, false); // Sólido, mas sem o mouse de edição
-                ctx.restore();
+    for (let row = 0; row < 10; row++) {
+        for (let col = 0; col < 10; col++) {
+            
+            // Desenha a célula para todos os andares empilhando de baixo para cima perfeitamente
+            for (const f of floors) {
+                // 1. Fundação
+                if (f < currentFloor) {
+                    renderCell(row, col, f, true, false, false, false);
+                } 
+                // 2. Andar Atual
+                else if (f === currentFloor) {
+                    renderCell(row, col, f, false, currentEraseMode, isCutaway, true);
+                } 
+                // 3. O TETO ESQUECIDO (Agora simula o The Sims!)
+                else if (f > currentFloor && !isCutaway) {
+                    renderCell(row, col, f, false, false, false, false);
+                }
             }
+
         }
     }
 
