@@ -17,8 +17,7 @@ let undergroundColor = '#0a0705';
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
-// Pitch de inclinação (Taxa de subida por tile)
-let roofPitch = 24;
+let roofPitch = 24; // Padrão Alta (24px - Metade da parede)
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -169,7 +168,7 @@ function precalculateRooms() {
                         }
                     }
                     
-                    // Alimenta TODOS os quadrados da Bounding Box (Isso preenche a lacuna do L)
+                    // SOLUÇÃO DA LACUNA: Todos os quadrados (até os vazios no canto do "L") recebem a Bounding Box
                     const bounds = {minR, maxR, minC, maxC};
                     for (let rr = minR; rr <= maxR; rr++) {
                         for (let cc = minC; cc <= maxC; cc++) {
@@ -186,7 +185,6 @@ function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
     const lower = mapData[currentFloor - 1][r][c];
-    
     if (lower.column === 1) return true;
     if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
     if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
@@ -198,7 +196,6 @@ function isFloorSupported(r, c) {
 function isWallSupported(r, c, side) {
     if (currentFloor <= 0) return true;
     if (!mapData[currentFloor - 1]) return false;
-
     const lower = mapData[currentFloor - 1][r][c];
     if (side === 'L' && lower.wallL > 0) return true;
     if (side === 'R' && lower.wallR > 0) return true;
@@ -213,7 +210,7 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
-// O Telhado agora é ocultado se houver laje pintada ou um cômodo totalmente fechado acima dele
+// O Telhado de baixo é apagado estritamente se houver chão ou sala fechada em cima (Mascara a invasão)
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
@@ -295,7 +292,6 @@ function updateFloorState(r, c, incomingType, eraseMode) {
 
 function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     if (startRow < 0 || startRow >= 10 || startCol < 0 || startCol >= 10) return;
-    
     if (paintMode === 1 && !isFloorSupported(startRow, startCol)) return;
     
     const startType = getFloorType(startRow, startCol, 'CLICK', startQuad);
@@ -307,7 +303,6 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
 
     while(queue.length > 0) {
         const {r, c, type} = queue.shift();
-        
         const oldFloor = map[r][c].floor;
         map[r][c].floor = updateFloorState(r, c, type, paintMode === 0);
         
@@ -317,11 +312,8 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
         const wNS = map[r][c].wallNS > 0 || (lowerMap && lowerMap[r][c].wallNS > 0);
         if (wWE || wNS) continue;
 
-        const canNW = [1, 2, 4].includes(type);
-        const canNE = [1, 2, 5].includes(type);
-        const canSW = [1, 3, 4].includes(type);
-        const canSE = [1, 3, 5].includes(type);
-
+        const canNW = [1, 2, 4].includes(type); const canNE = [1, 2, 5].includes(type);
+        const canSW = [1, 3, 4].includes(type); const canSE = [1, 3, 5].includes(type);
         const wL = map[r][c].wallL > 0 || (lowerMap && lowerMap[r][c].wallL > 0);
         const wR = map[r][c].wallR > 0 || (lowerMap && lowerMap[r][c].wallR > 0);
         const wL_next = c < 9 && (map[r][c+1].wallL > 0 || (lowerMap && lowerMap[r][c+1].wallL > 0));
@@ -329,30 +321,22 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
 
         if (canNW && c > 0 && !wL && !visited.has(`${r},${c-1}`)) {
             if (paintMode === 0 || isFloorSupported(r, c-1)) {
-                const nextType = getFloorType(r, c-1, 'SE');
-                visited.add(`${r},${c-1}`);
-                queue.push({r, c: c-1, type: nextType});
+                const nextType = getFloorType(r, c-1, 'SE'); visited.add(`${r},${c-1}`); queue.push({r, c: c-1, type: nextType});
             }
         }
         if (canSE && c < 9 && !wL_next && !visited.has(`${r},${c+1}`)) {
             if (paintMode === 0 || isFloorSupported(r, c+1)) {
-                const nextType = getFloorType(r, c+1, 'NW');
-                visited.add(`${r},${c+1}`);
-                queue.push({r, c: c+1, type: nextType});
+                const nextType = getFloorType(r, c+1, 'NW'); visited.add(`${r},${c+1}`); queue.push({r, c: c+1, type: nextType});
             }
         }
         if (canNE && r > 0 && !wR && !visited.has(`${r-1},${c}`)) {
             if (paintMode === 0 || isFloorSupported(r-1, c)) {
-                const nextType = getFloorType(r-1, c, 'SW');
-                visited.add(`${r-1},${c}`);
-                queue.push({r: r-1, c, type: nextType});
+                const nextType = getFloorType(r-1, c, 'SW'); visited.add(`${r-1},${c}`); queue.push({r: r-1, c, type: nextType});
             }
         }
         if (canSW && r < 9 && !wR_next && !visited.has(`${r+1},${c}`)) {
             if (paintMode === 0 || isFloorSupported(r+1, c)) {
-                const nextType = getFloorType(r+1, c, 'NE');
-                visited.add(`${r+1},${c}`);
-                queue.push({r: r+1, c, type: nextType});
+                const nextType = getFloorType(r+1, c, 'NE'); visited.add(`${r+1},${c}`); queue.push({r: r+1, c, type: nextType});
             }
         }
     }
@@ -422,11 +406,8 @@ function updatePreview() {
             const minC = Math.min(dragStartNode.col, hoverCol);
             const maxC = Math.max(dragStartNode.col, hoverCol);
             const steps = Math.min(maxR - minR, maxC - minC); 
-            
             if (steps === 0) return;
-
-            const M_R = minR + steps;
-            const M_C = minC + steps;
+            const M_R = minR + steps; const M_C = minC + steps;
 
             const dragSE = hoverRow >= dragStartNode.row && hoverCol >= dragStartNode.col;
             const dragNW = hoverRow < dragStartNode.row && hoverCol < dragStartNode.col;
@@ -495,15 +476,6 @@ function updatePreview() {
     }
 }
 
-// NOVO CÁLCULO 3D: Pega a altura Z exata da Pirâmide para qualquer ponto contínuo (Simula Vertex Math)
-function getRoofZ(r, c, bounds, pitch) {
-    let distR = Math.min(r - bounds.minR, bounds.maxR + 1 - r);
-    let distC = Math.min(c - bounds.minC, bounds.maxC + 1 - c);
-    distR = Math.max(0, distR);
-    distC = Math.max(0, distC);
-    return Math.min(distR, distC) * pitch;
-}
-
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
@@ -519,15 +491,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     const pOeste = gridToScreen(row + 1, col);
 
     const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+    
     let shouldDrawGrid = false;
-
     if (fIndex === currentFloor) {
-        if (currentFloor <= 0) {
-            shouldDrawGrid = true; 
-        } else {
-            const supp = isFloorSupported(row, col);
-            shouldDrawGrid = hasContent || supp; 
-        }
+        if (currentFloor <= 0) shouldDrawGrid = true; 
+        else shouldDrawGrid = hasContent || isFloorSupported(row, col); 
     } else if (fIndex < currentFloor) {
         shouldDrawGrid = hasContent;
     } else if (fIndex > currentFloor) {
@@ -535,7 +503,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     }
 
     let isDirt = false;
-    // Removemos o enclosedCache daqui pra liberar a sujeira se o jogador quebrar a casa
     if (fIndex <= 0) {
         if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
             isDirt = true;
@@ -549,17 +516,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     } else if (targetMap[row][col].floor > 0) {
         ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
         ctx.beginPath();
-        if (targetMap[row][col].floor === 1) { 
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-        } else if (targetMap[row][col].floor === 2) { 
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
-        } else if (targetMap[row][col].floor === 3) { 
-            ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
-        } else if (targetMap[row][col].floor === 4) { 
-            ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
-        } else if (targetMap[row][col].floor === 5) { 
-            ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
-        }
+        if (targetMap[row][col].floor === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+        else if (targetMap[row][col].floor === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+        else if (targetMap[row][col].floor === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
+        else if (targetMap[row][col].floor === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
+        else if (targetMap[row][col].floor === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
         ctx.closePath(); ctx.fill(); 
     }
     
@@ -606,41 +567,53 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // A CURA DA OCLUSÃO E DA MALHA 3D MÓDULAR (Substitui o Clip Infinito)
     let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
+
+    // O RETORNO DA PIRÂMIDE GIGANTE (Sem laços infinitos, sem buracos, sem vazamentos de Z)
     let roofBounds = cellToRoofBoundsCache[`${fIndex},${row},${col}`];
 
     if (!isCutaway && fIndex >= 0 && !hideLowerRoof && roofBounds && !hasStructureAbove(fIndex, row, col)) {
+        const bounds = roofBounds;
         
-        // 1. Calcula matematicamente a altura da pirâmide exata nos 4 cantos DESTA célula
-        let zN = getRoofZ(row, col, roofBounds, roofPitch);
-        let zE = getRoofZ(row, col + 1, roofBounds, roofPitch);
-        let zS = getRoofZ(row + 1, col + 1, roofBounds, roofPitch);
-        let zW = getRoofZ(row + 1, col, roofBounds, roofPitch);
-        let zC = getRoofZ(row + 0.5, col + 0.5, roofBounds, roofPitch);
+        let c_pN = gridToScreen(bounds.minR, bounds.minC); c_pN.y -= blockHeight;
+        let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1); c_pE.y -= blockHeight;
+        let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1); c_pS.y -= blockHeight;
+        let c_pW = gridToScreen(bounds.maxR + 1, bounds.minC); c_pW.y -= blockHeight;
 
-        // 2. Ergue os 4 cantos para a altura correspondente na tela
-        let pN = gridToScreen(row, col); pN.y -= (blockHeight + zN);
-        let pE = gridToScreen(row, col + 1); pE.y -= (blockHeight + zE);
-        let pS = gridToScreen(row + 1, col + 1); pS.y -= (blockHeight + zS);
-        let pW = gridToScreen(row + 1, col); pW.y -= (blockHeight + zW);
-        let pC = gridToScreen(row + 0.5, col + 0.5); pC.y -= (blockHeight + zC);
+        let midR = (bounds.minR + bounds.maxR + 1) / 2;
+        let midC = (bounds.minC + bounds.maxC + 1) / 2;
+        let peak = gridToScreen(midR, midC);
+        
+        // CÁLCULO DE ALTURA DE PICO (O teto atinge 24px no limite visual de 1 bloco de distância)
+        let size = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1);
+        let roofHeight = (size / 2) * roofPitch;
+        peak.y -= (blockHeight + roofHeight);
 
+        // A GUILHOTINA ISOMÉTRICA (Corta a pirâmide gigante verticalmente sem afetar andares ou colisão)
         ctx.save();
-        const drawMicroTri = (p1, p2, p3, overlay) => {
+        ctx.beginPath();
+        ctx.moveTo(pSul.x, pSul.y - blockHeight); 
+        ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
+        ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); // Vai até o topo da tela
+        ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
+        ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
+        ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
+        ctx.closePath();
+        ctx.clip(); 
+
+        const drawTri = (p1, p2, p3, overlay) => {
             ctx.fillStyle = roofColor;
             ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); ctx.fill();
             ctx.fillStyle = overlay; ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 0.5; ctx.stroke(); // Textura sutil
+            ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 1; ctx.stroke();
         };
 
-        // 3. Monta a micro-pirâmide perfeitamente costurada na célula
-        drawMicroTri(pN, pW, pC, 'rgba(0,0,0,0.3)'); // Face Noroeste (Sombra dura)
-        drawMicroTri(pN, pE, pC, 'rgba(0,0,0,0.1)'); // Face Nordeste (Sombra suave)
-        drawMicroTri(pW, pS, pC, 'rgba(255,255,255,0.15)'); // Face Sudoeste (Iluminada)
-        drawMicroTri(pE, pS, pC, 'rgba(0,0,0,0.4)'); // Face Sudeste (Sombra muito dura)
-        
-        ctx.restore();
+        drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); 
+        drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); 
+        drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); 
+        drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); 
+
+        ctx.restore(); 
     }
 
     if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
@@ -686,7 +659,8 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // O Z-SORTING ABSOLUTO: Cria uma lista de TUDO no mundo e ordena pela distância matemática (Row + Col)
+    // A MÁGICA DA OCLUSÃO (Z-SORTING ABSOLUTO): Cria uma fila e processa rigorosamente de trás para frente.
+    // Isso garante que a parede do Piso 1 esmague e desenhe por cima do telhado do Térreo, cravando na linha laranja!
     let renderQueue = [];
     for (const f of floors) {
         if (currentFloor < 0 && f >= 0) continue;
@@ -698,13 +672,12 @@ function drawIsometricGrid() {
         }
     }
 
-    // A MÁGICA: Quem está mais atrás (menor R+C) é pintado antes. Quem está no andar de baixo (menor F) pinta antes.
     renderQueue.sort((a, b) => {
         let depthA = a.r + a.c;
         let depthB = b.r + b.c;
         if (depthA !== depthB) return depthA - depthB;
         if (a.f !== b.f) return a.f - b.f;
-        return a.c - b.c;
+        return a.c - b.c; 
     });
 
     for (const cell of renderQueue) {
