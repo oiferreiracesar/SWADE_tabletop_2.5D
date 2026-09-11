@@ -17,8 +17,8 @@ let undergroundColor = '#0a0705';
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
-// Pitch padrão correspondente ao dropdown do HTML
-let roofPitch = 12;
+// O Pitch alto (24px) crava perfeitamente na linha laranja que você desenhou
+let roofPitch = 24;
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -219,12 +219,16 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
-// O Teto de baixo só some se o de cima tiver CHÃO PINTADO ou PAREDE (não importa se é sala fechada ou não).
+// ATUALIZADO (A CURA DA LACUNA): O telhado só some se a célula superior tiver CHÃO PINTADO ou se estiver no miolo de uma sala fechada. 
+// Isso resolveu as paredes falsas deletando telhados de varanda!
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
     const cell = upper[r][c];
-    if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
+    
+    if (cell.floor > 0) return true;
+    if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true;
+    
     return false;
 }
 
@@ -639,7 +643,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         hideLowerRoof = true;
     }
 
-    // O RETORNO DA PIRÂMIDE GIGANTE (Com Máscara de Ocupação Perfeita)
+    // O RETORNO DA PIRÂMIDE GIGANTE CORRIGIDA (Bounding Box)
     if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
@@ -657,11 +661,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let midC = (bounds.minC + bounds.maxC + 1) / 2;
         let peak = gridToScreen(midR, midC);
         
-        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * roofPitch;
+        // A SOLUÇÃO DA LINHA LARANJA: O Telhado é matematicamente travado na altura do Pitch, garantindo não passar da metade da parede!
+        let roofHeight = roofPitch; 
         peak.y -= (blockHeight + roofHeight);
 
-        // A MÁSCARA 3D GUILHOTINA: Corta o telhado verticalmente exato no quadrado dele
-        // Isso resolve a "invasão" do telhado por cima das paredes da frente!
+        // A GUILHOTINA ISOMÉTRICA (Corta a pirâmide para ela não vazar pro lado de fora do quadrado)
         ctx.save();
         ctx.beginPath();
         ctx.moveTo(pSul.x, pSul.y - blockHeight); 
@@ -745,14 +749,14 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // RETORNO AO Z-SORTING CLÁSSICO: Garante que os andares da frente sobreponham corretamente
-    for (let row = 0; row < 10; row++) {
-        for (let col = 0; col < 10; col++) {
-            
-            for (const f of floors) {
-                if (currentFloor < 0 && f >= 0) continue;
-                if (currentFloor >= 0 && f < 0) continue;
+    // A MÁGICA DA COLISÃO ISOMÉTRICA (Z-SORTING POR ANDAR)
+    // Desenhamos TODOS os quadrados do Térreo (incluindo telhados)... e SÓ DEPOIS desenhamos as paredes do Piso 1 por cima deles!
+    for (const f of floors) {
+        if (currentFloor < 0 && f >= 0) continue;
+        if (currentFloor >= 0 && f < 0) continue;
 
+        for (let row = 0; row < 10; row++) {
+            for (let col = 0; col < 10; col++) {
                 if (f < currentFloor) {
                     renderCell(row, col, f, true, false, false, false);
                 } 
@@ -763,7 +767,6 @@ function drawIsometricGrid() {
                     renderCell(row, col, f, false, false, false, false);
                 }
             }
-
         }
     }
 
