@@ -17,8 +17,8 @@ let undergroundColor = '#0a0705';
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
-// ATUALIZADO: Pitch padrão médio
-let roofPitch = 24;
+// ATUALIZADO: Inclinação Média agora é 12
+let roofPitch = 12;
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -225,6 +225,20 @@ function hasStructureAbove(fIndex, r, c) {
     const cell = upper[r][c];
     if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
     return false;
+}
+
+// NOVA FUNÇÃO: Verifica se o andar está totalmente limpo para limpar o grid visual
+function isFloorEmpty(fIndex) {
+    const fMap = mapData[fIndex];
+    if (!fMap) return true;
+    for(let r=0; r<10; r++) {
+        for(let c=0; c<10; c++) {
+            if (fMap[r][c].floor > 0 || fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0 || fMap[r][c].wallL > 0 || fMap[r][c].wallR > 0 || fMap[r][c].column > 0) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 function getTargetEdge(hRow, hCol, hQuad) {
@@ -620,8 +634,13 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
-    // ATUALIZADO: Regra fIndex >= currentFloor esconde telhados inferiores quando estamos em andares superiores
-    if (!isCutaway && fIndex >= 0 && fIndex >= currentFloor && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+    // REGRA DE OCULTAÇÃO NO ANDAR ATUAL (Mascara a vista de andares limpos)
+    let hideLowerRoof = false;
+    if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
+        hideLowerRoof = true;
+    }
+
+    if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
         let c_pN = gridToScreen(bounds.minR, bounds.minC);
@@ -724,20 +743,16 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    for (let row = 0; row < 10; row++) {
-        for (let col = 0; col < 10; col++) {
-            
-            for (const f of floors) {
-                if (currentFloor < 0 && f >= 0) {
-                    continue;
-                }
-                
-                if (currentFloor >= 0 && f < 0) {
-                    continue;
-                }
+    // ATUALIZADO: Invertemos o laço (Z-Sorting) para desenhar Térreo inteiro antes do Piso 1
+    // Isso garante matematicamente que a parede do Piso 1 ficará na frente do Telhado Cortado.
+    for (const f of floors) {
+        if (currentFloor < 0 && f >= 0) continue;
+        if (currentFloor >= 0 && f < 0) continue;
 
+        for (let row = 0; row < 10; row++) {
+            for (let col = 0; col < 10; col++) {
                 if (f < currentFloor) {
-                    renderCell(row, col, f, true, false, false, false);
+                    renderCell(row, col, f, isCutaway, false, false, false);
                 } 
                 else if (f === currentFloor) {
                     renderCell(row, col, f, false, currentEraseMode, isCutaway, true);
@@ -746,7 +761,6 @@ function drawIsometricGrid() {
                     renderCell(row, col, f, false, false, false, false);
                 }
             }
-
         }
     }
 
@@ -832,7 +846,6 @@ document.getElementById('sliderAltura').addEventListener('input', (e) => {
     drawIsometricGrid();
 });
 
-// ATUALIZADO: Dropdown do The Sims
 document.getElementById('roofPitchSelect').addEventListener('change', (e) => {
     roofPitch = parseInt(e.target.value);
     drawIsometricGrid();
