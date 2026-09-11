@@ -17,7 +17,8 @@ let undergroundColor = '#0a0705';
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
-let roofPitch = 6;
+// ATUALIZADO: Pitch Médio trava em 24px (Metade exata da altura da parede)
+let roofPitch = 24;
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -36,7 +37,6 @@ let mapData = {};
 let map; 
 
 let enclosedCache = {};
-let roomBoundsCache = {};
 
 function createEmptyMap() {
     const newMap = [];
@@ -129,51 +129,11 @@ function isEnclosed(fIndex, startRow, startCol) {
 
 function precalculateRooms() {
     enclosedCache = {};
-    roomBoundsCache = {};
     const floors = Object.keys(mapData).map(Number);
-    
     for (const f of floors) {
         for (let r = 0; r < 10; r++) {
             for (let c = 0; c < 10; c++) {
                 enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
-            }
-        }
-        
-        const visited = new Set();
-        for (let r = 0; r < 10; r++) {
-            for (let c = 0; c < 10; c++) {
-                if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
-                    let minR = r, maxR = r, minC = c, maxC = c;
-                    const queue = [{r, c}];
-                    const roomCells = [];
-                    visited.add(`${r},${c}`);
-                    
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        roomCells.push(curr);
-                        minR = Math.min(minR, curr.r);
-                        maxR = Math.max(maxR, curr.r);
-                        minC = Math.min(minC, curr.c);
-                        maxC = Math.max(maxC, curr.c);
-                        
-                        const neighbors = [
-                            {r: curr.r-1, c: curr.c}, {r: curr.r+1, c: curr.c},
-                            {r: curr.r, c: curr.c-1}, {r: curr.r, c: curr.c+1}
-                        ];
-                        for (let n of neighbors) {
-                            if (n.r >= 0 && n.r < 10 && n.c >= 0 && n.c < 10) {
-                                if (!visited.has(`${n.r},${n.c}`) && enclosedCache[`${f},${n.r},${n.c}`]) {
-                                    visited.add(`${n.r},${n.c}`);
-                                    queue.push(n);
-                                }
-                            }
-                        }
-                    }
-                    const bounds = {minR, maxR, minC, maxC};
-                    for (let cell of roomCells) {
-                        roomBoundsCache[`${f},${cell.r},${cell.c}`] = bounds;
-                    }
-                }
             }
         }
     }
@@ -218,15 +178,12 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
-// ATUALIZADO: Ignora paredes. O telhado só some se a sala de cima tiver um chão ou for fechada! (Cura o losango vazio)
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
     const cell = upper[r][c];
-    
-    if (cell.floor > 0) return true; 
-    if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true; 
-    
+    if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
+    if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true;
     return false;
 }
 
@@ -503,7 +460,7 @@ function updatePreview() {
     }
 }
 
-// ATUALIZADO: renderCell agora usa renderPass. 0 = Construção Base | 1 = Apenas Telhado
+// ATUALIZADO: renderPass separa a renderização base da renderização do Telhado
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
@@ -585,11 +542,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y);
             } else if (previewType === 3) { 
                 ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y);
-        } else if (previewType === 4) { 
-            ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
-        } else if (previewType === 5) { 
-            ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
-        }
+            } else if (previewType === 4) { 
+                ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y);
+            } else if (previewType === 5) { 
+                ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y);
+            }
             ctx.closePath();
             
             if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)';
@@ -673,64 +630,66 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             }
         }
     } 
-    // FASE 2: RENDERIZA O TELHADO (Para colar por cima das paredes traseiras)
+    // FASE 2: O VERDADEIRO GERADOR DE TELHADOS MODULARES (Auto-Tiling Mansard Roof)
     else if (renderPass === 1) {
         let hideLowerRoof = false;
         if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
             hideLowerRoof = true;
         }
 
+        // A célula só é "sólida para telhado" se for uma sala fechada e NÃO tiver andares em cima dela
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
-            const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
+            let rH = roofPitch; 
             
-            let c_pN = gridToScreen(bounds.minR, bounds.minC);
-            let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1);
-            let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1);
-            let c_pW = gridToScreen(bounds.maxR + 1, bounds.minC);
-            
-            c_pN.y -= blockHeight;
-            c_pE.y -= blockHeight;
-            c_pS.y -= blockHeight;
-            c_pW.y -= blockHeight;
+            // Base do Telhado (no topo da parede)
+            let c_pN = {x: pNorte.x, y: pNorte.y - blockHeight};
+            let c_pE = {x: pLeste.x, y: pLeste.y - blockHeight};
+            let c_pS = {x: pSul.x, y: pSul.y - blockHeight};
+            let c_pW = {x: pOeste.x, y: pOeste.y - blockHeight};
 
-            let midR = (bounds.minR + bounds.maxR + 1) / 2;
-            let midC = (bounds.minC + bounds.maxC + 1) / 2;
-            let peak = gridToScreen(midR, midC);
-            
-            let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * roofPitch;
-            peak.y -= (blockHeight + roofHeight);
+            // Topo do Telhado (na altura do Roof Pitch)
+            let t_pN = {x: c_pN.x, y: c_pN.y - rH};
+            let t_pE = {x: c_pE.x, y: c_pE.y - rH};
+            let t_pS = {x: c_pS.x, y: c_pS.y - rH};
+            let t_pW = {x: c_pW.x, y: c_pW.y - rH};
+
+            // Verifica as 4 células vizinhas para fazer o Auto-Tiling
+            // Se o vizinho é vazio ou tem uma parede de 2º Andar, ele corta a rampa do telhado!
+            let nNW = enclosedCache[`${fIndex},${row},${col-1}`] && !hasStructureAbove(fIndex, row, col-1);
+            let nNE = enclosedCache[`${fIndex},${row-1},${col}`] && !hasStructureAbove(fIndex, row-1, col);
+            let nSE = enclosedCache[`${fIndex},${row},${col+1}`] && !hasStructureAbove(fIndex, row, col+1);
+            let nSW = enclosedCache[`${fIndex},${row+1},${col}`] && !hasStructureAbove(fIndex, row+1, col);
 
             ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
-            ctx.closePath();
-            ctx.clip(); 
-
-            const drawTri = (p1, p2, p3, overlay) => {
+            
+            // Desenhador de faces 3D
+            const drawFace = (p1, p2, p3, p4, overlay) => {
                 ctx.fillStyle = roofColor;
-                ctx.beginPath(); 
-                ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); 
-                ctx.closePath(); 
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y);
+                ctx.closePath();
                 ctx.fill();
                 
-                ctx.fillStyle = overlay; 
+                ctx.fillStyle = overlay;
                 ctx.fill();
                 
-                ctx.strokeStyle = 'rgba(0,0,0,0.15)'; 
-                ctx.lineWidth = 1; 
+                ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+                ctx.lineWidth = 1;
                 ctx.stroke();
             };
 
-            drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); 
-            drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); 
-            drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); 
-            drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); 
+            // 1. Faces traseiras da pirâmide modular
+            if (!nNW) drawFace(t_pW, t_pN, c_pN, c_pW, 'rgba(0,0,0,0.4)'); 
+            if (!nNE) drawFace(t_pN, t_pE, c_pE, c_pN, 'rgba(0,0,0,0.2)'); 
+            
+            // 2. Laje/Cume do Telhado (Plano no topo)
+            drawFace(t_pN, t_pE, t_pS, t_pW, 'rgba(255,255,255,0.05)'); 
+            
+            // 3. Faces frontais da pirâmide modular
+            if (!nSE) drawFace(t_pE, t_pS, c_pS, c_pE, 'rgba(0,0,0,0.6)'); 
+            if (!nSW) drawFace(t_pS, t_pW, c_pW, c_pS, 'rgba(255,255,255,0.15)'); 
 
-            ctx.restore(); 
+            ctx.restore();
         }
     }
 
@@ -749,12 +708,11 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // ATUALIZADO: O laço Z-Sorting Original perfeito. 
-    // Em vez de desenhar andares, desenhamos quadrado a quadrado
+    // ATUALIZADO: O laço Z-Sorting Perfeito em Duas Fases
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             
-            // FASE 1: Desenha Térreo e Pisos de cima desse quadrado
+            // FASE 1: Desenha as paredes e o chão
             for (const f of floors) {
                 if (currentFloor < 0 && f >= 0) continue;
                 if (currentFloor >= 0 && f < 0) continue;
@@ -770,7 +728,7 @@ function drawIsometricGrid() {
                 }
             }
 
-            // FASE 2: Desenha APENAS os telhados por cima de tudo na mesma célula
+            // FASE 2: Desenha APENAS os telhados por cima das paredes do mesmo quadrado
             for (const f of floors) {
                 if (currentFloor < 0 && f >= 0) continue;
                 if (currentFloor >= 0 && f < 0) continue;
