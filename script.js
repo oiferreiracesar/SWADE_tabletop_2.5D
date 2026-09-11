@@ -36,6 +36,7 @@ let mapData = {};
 let map; 
 
 let enclosedCache = {};
+let cellToRoofBoundsCache = {};
 
 function createEmptyMap() {
     const newMap = [];
@@ -128,66 +129,128 @@ function isEnclosed(fIndex, startRow, startCol) {
 
 function precalculateRooms() {
     enclosedCache = {};
+    cellToRoofBoundsCache = {};
     const floors = Object.keys(mapData).map(Number);
+    
     for (const f of floors) {
         for (let r = 0; r < 10; r++) {
             for (let c = 0; c < 10; c++) {
                 enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
             }
         }
+        
+        const visited = new Set();
+        for (let r = 0; r < 10; r++) {
+            for (let c = 0; c < 10; c++) {
+                if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
+                    let minR = r, maxR = r, minC = c, maxC = c;
+                    const queue = [{r, c}];
+                    visited.add(`${r},${c}`);
+                    
+                    while (queue.length > 0) {
+                        const curr = queue.shift();
+                        minR = Math.min(minR, curr.r);
+                        maxR = Math.max(maxR, curr.r);
+                        minC = Math.min(minC, curr.c);
+                        maxC = Math.max(maxC, curr.c);
+                        
+                        const neighbors = [
+                            {r: curr.r-1, c: curr.c}, {r: curr.r+1, c: curr.c},
+                            {r: curr.r, c: curr.c-1}, {r: curr.r, c: curr.c+1}
+                        ];
+                        for (let n of neighbors) {
+                            if (n.r >= 0 && n.r < 10 && n.c >= 0 && n.c < 10) {
+                                if (!visited.has(`${n.r},${n.c}`) && enclosedCache[`${f},${n.r},${n.c}`]) {
+                                    visited.add(`${n.r},${n.c}`);
+                                    queue.push(n);
+                                }
+                            }
+                        }
+                    }
+                    
+                    const bounds = {minR, maxR, minC, maxC};
+                    for (let rr = minR; rr <= maxR; rr++) {
+                        for (let cc = minC; cc <= maxC; cc++) {
+                            cellToRoofBoundsCache[`${f},${rr},${cc}`] = bounds;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-// O CÁLCULO MESTRE 3D: Campo de Distância Verdadeiro (Medial Axis / Straight Skeleton)
-// Calcula a altura (Z) de qualquer vértice avaliando a distância dele para fora da casa.
+// O NOVO CÁLCULO EUCLIDIANO 3D: Detecta diagonais e suaviza octógonos
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
+    
     for (let r = -2; r <= 11; r++) {
         for (let c = -2; c <= 11; c++) {
             let isEnclosedCell = false;
+            let ft = 0;
             if (r >= 0 && r < 10 && c >= 0 && c < 10) {
                 isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
+                if (isEnclosedCell) ft = mapData[fIndex][r][c].floor;
             }
+
             if (!isEnclosedCell) {
-                let dx = 0;
-                if (x < r) dx = r - x;
-                else if (x > r + 1) dx = x - (r + 1);
+                // Cálculo de Distância Euclidiana para um quadrado vazio
+                let dx = Math.max(0, r - x, x - (r + 1));
+                let dy = Math.max(0, c - y, y - (c + 1));
+                let d = Math.sqrt(dx * dx + dy * dy);
+                if (d < minDist) minDist = d;
+            } else if (ft >= 2 && ft <= 5) {
+                // Se a célula for uma sala diagonal, o telhado para na linha da parede!
+                let x1, y1, x2, y2;
+                if (ft === 2 || ft === 3) { x1 = r; y1 = c + 1; x2 = r + 1; y2 = c; } // Diagonal Noroeste / Sudeste
+                else { x1 = r; y1 = c; x2 = r + 1; y2 = c + 1; } // Diagonal Sudoeste / Nordeste
                 
-                let dy = 0;
-                if (y < c) dy = c - y;
-                else if (y > c + 1) dy = y - (c + 1);
-                
-                let dist = Math.max(dx, dy);
-                if (dist < minDist) minDist = dist;
+                // Distância matemática do ponto (x,y) até a linha diagonal da célula
+                let l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+                let t = Math.max(0, Math.min(1, ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / l2));
+                let pxProj = x1 + t * (x2 - x1);
+                let pyProj = y1 + t * (y2 - y1);
+                let d = Math.sqrt((x - pxProj) * (x - pxProj) + (y - pyProj) * (y - pyProj));
+                if (d < minDist) minDist = d;
             }
         }
     }
     return minDist * pitch;
 }
 
-// SHADER 3D MATEMÁTICO: Calcula a direção do triângulo para pintá-lo com sombra precisa.
+// NOVO SHADER DE LUZ (Dot Product / Iluminação Direcional)
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
     if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
 
-    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; // Inclinação X
-    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; // Inclinação Y
+    // Calcula a inclinação (A normal do polígono)
+    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
+    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
 
-    let eps = 0.01;
     let nx = -a; 
     let ny = -b;
+    let eps = 0.05;
 
-    if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; // Face Sudoeste (Sol)
-    if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; // Face Nordeste
-    if (Math.abs(nx) <= eps && ny > eps) return 'rgba(0,0,0,0.4)'; // Face Sudeste (Sombra Forte)
-    if (Math.abs(nx) <= eps && ny < -eps) return 'rgba(0,0,0,0.25)'; // Face Noroeste
+    // Se o triângulo for plano (Cumeeira de telhados estilo Mansard)
+    if (Math.abs(nx) < eps && Math.abs(ny) < eps) return 'rgba(255,255,255,0.05)'; 
 
-    if (nx > eps && ny > eps) return 'rgba(0,0,0,0.15)'; // Quina Sul
-    if (nx > eps && ny < -eps) return 'rgba(255,255,255,0.05)'; // Quina Oeste
-    if (nx < -eps && ny > eps) return 'rgba(0,0,0,0.3)'; // Quina Leste
-    if (nx < -eps && ny < -eps) return 'rgba(0,0,0,0.2)'; // Quina Norte
+    // Normaliza o vetor 3D
+    let len = Math.sqrt(nx*nx + ny*ny + 1);
+    let dX = nx / len;
+    let dY = ny / len;
 
-    return 'rgba(255,255,255,0.05)'; // Cumeeira plana
+    // A Posição do Sol (Sudoeste Alto) - Brilha de frente para a câmera
+    let lightX = 0.7; 
+    let lightY = -0.3; 
+
+    let dot = (dX * lightX) + (dY * lightY);
+
+    // Mapeamento dinâmico: Gera os 8 tons exatos para que os octógonos fiquem lisos
+    if (dot > 0.3) return 'rgba(255, 255, 255, 0.15)'; // Encosta Sudoeste (Sol direto)
+    if (dot > 0.0) return 'rgba(255, 255, 255, 0.05)'; // Faces laterais claras
+    if (dot > -0.3) return 'rgba(0, 0, 0, 0.15)';      // Sombras Intermediárias
+    if (dot > -0.6) return 'rgba(0, 0, 0, 0.3)';       // Encosta Leste / Nordeste
+    return 'rgba(0, 0, 0, 0.45)';                      // Encosta Sudeste (Sombra Forte)
 }
 
 function isFloorSupported(r, c) {
@@ -483,7 +546,8 @@ function updatePreview() {
     }
 }
 
-function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
+// O RENDERIZADOR ISOMÉTRICO (Fases desativadas! O Z-Sorting Clássico voltou)
+function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
 
@@ -496,145 +560,148 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     const pSul   = gridToScreen(row + 1, col + 1);
     const pOeste = gridToScreen(row + 1, col);
 
-    const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
-    
-    let shouldDrawGrid = false;
-    if (fIndex === currentFloor) {
-        if (currentFloor <= 0) shouldDrawGrid = true; 
-        else shouldDrawGrid = hasContent || isFloorSupported(row, col); 
-    } else if (fIndex < currentFloor) {
-        shouldDrawGrid = hasContent;
-    } else if (fIndex > currentFloor) {
-        shouldDrawGrid = false;
-    }
-
-    let isDirt = false;
-    if (fIndex <= 0) {
-        if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
-            isDirt = true;
+    if (renderPass === 0) {
+        const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+        
+        let shouldDrawGrid = false;
+        if (fIndex === currentFloor) {
+            if (currentFloor <= 0) shouldDrawGrid = true; 
+            else shouldDrawGrid = hasContent || isFloorSupported(row, col); 
+        } else if (fIndex < currentFloor) {
+            shouldDrawGrid = hasContent;
+        } else if (fIndex > currentFloor) {
+            shouldDrawGrid = false;
         }
-    }
 
-    if (isDirt) {
-        ctx.fillStyle = dirtColor; 
-        ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-        ctx.closePath(); ctx.fill();
-    } else if (targetMap[row][col].floor > 0) {
-        ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
-        ctx.beginPath();
-        if (targetMap[row][col].floor === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-        else if (targetMap[row][col].floor === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-        else if (targetMap[row][col].floor === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
-        else if (targetMap[row][col].floor === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
-        else if (targetMap[row][col].floor === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
-        ctx.closePath(); ctx.fill(); 
-    }
-    
-    if (shouldDrawGrid) {
-        ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-        ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
-    }
+        let isDirt = false;
+        if (fIndex <= 0) {
+            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
+                isDirt = true;
+            }
+        }
 
-    if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
-        const supp = isFloorSupported(row, col);
-        const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
-        ctx.beginPath();
-        if (previewType === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-        else if (previewType === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-        else if (previewType === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
-        else if (previewType === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
-        else if (previewType === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
-        ctx.closePath();
-        ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
-        ctx.fill();
-    }
-
-    let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
-    let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
-    if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
-    if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
-
-    let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
-    let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
-    if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
-    if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
-
-    if (targetMap[row][col].column === 1) {
-        let colH = applyCutaway ? cutawayHeight : blockHeight;
-        const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
+        if (isDirt) {
+            ctx.fillStyle = dirtColor; 
+            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.closePath(); ctx.fill();
+        } else if (targetMap[row][col].floor > 0) {
+            ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
+            ctx.beginPath();
+            if (targetMap[row][col].floor === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+            else if (targetMap[row][col].floor === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+            else if (targetMap[row][col].floor === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
+            else if (targetMap[row][col].floor === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
+            else if (targetMap[row][col].floor === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
+            ctx.closePath(); ctx.fill(); 
+        }
         
-        ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
-        ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
-        
-        ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
-        ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
-        
-        ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
-        ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
-    }
+        if (shouldDrawGrid) {
+            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
+        }
 
-    let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
+        if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+            const supp = isFloorSupported(row, col);
+            const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
+            ctx.beginPath();
+            if (previewType === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+            else if (previewType === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+            else if (previewType === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
+            else if (previewType === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
+            else if (previewType === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
+            ctx.closePath();
+            ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
+            ctx.fill();
+        }
 
-    // MALHA 3D DO TELHADO (Com Campo de Distância)
-    if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
-        
-        // Mede a distância das pontas e do centro para formar as águas-furtadas contínuas do L e do U
-        let zN = getRoofZ(fIndex, row, col, roofPitch);
-        let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
-        let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
-        let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
-        let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
-        let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
-        let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
-        let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
-        let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
+        let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
+        let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
+        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
+        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
 
-        // Pontos abstratos de matemática 3D para o Shader
-        let pN_3d = {x: row, y: col, z: zN};
-        let pNE_3d = {x: row, y: col + 0.5, z: zNE};
-        let pE_3d = {x: row, y: col + 1, z: zE};
-        let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
-        let pS_3d = {x: row + 1, y: col + 1, z: zS};
-        let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
-        let pW_3d = {x: row + 1, y: col, z: zW};
-        let pNW_3d = {x: row + 0.5, y: col, z: zNW};
-        let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
+        let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
+        let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
+        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
+        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
 
-        // Projeta os vértices para o 2D final na tela
-        let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
-        let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
-        let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
-        let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
-        let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
-        let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
-        let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
-        let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
-        let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
-
-        ctx.save();
-        const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
-            let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
-            if (overlay === 'rgba(0,0,0,0)') return;
-
-            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
-            ctx.fillStyle = roofColor; ctx.fill();
-            ctx.fillStyle = overlay; ctx.fill();
+        if (targetMap[row][col].column === 1) {
+            let colH = applyCutaway ? cutawayHeight : blockHeight;
+            const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
             
-            ctx.strokeStyle = roofColor; ctx.lineWidth = 1.0; ctx.stroke();
-            ctx.strokeStyle = overlay; ctx.stroke();
-        };
+            ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
+            
+            ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
+            ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
+            
+            ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+    } 
 
-        // Constrói os 8 fragmentos que formam a junção contínua da célula
-        drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
-        drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
-        drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
-        drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
-        drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
-        drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
-        drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
-        drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
-        
-        ctx.restore();
+    // FASE 1: O TELHADO 3D (Corte e Sombras Contínuas)
+    else if (renderPass === 1) {
+        let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
+
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && cellToRoofBoundsCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+            
+            // Distância matemática Euclidiana de cada vértice para a borda!
+            let zN = getRoofZ(fIndex, row, col, roofPitch);
+            let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
+            let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
+            let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
+            let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
+            let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
+            let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
+            let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
+            let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
+
+            let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
+            let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
+            let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
+            let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
+            let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
+            let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
+            let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
+            let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
+            let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
+
+            let pN_3d = {x: row, y: col, z: zN};
+            let pNE_3d = {x: row, y: col + 0.5, z: zNE};
+            let pE_3d = {x: row, y: col + 1, z: zE};
+            let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
+            let pS_3d = {x: row + 1, y: col + 1, z: zS};
+            let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
+            let pW_3d = {x: row + 1, y: col, z: zW};
+            let pNW_3d = {x: row + 0.5, y: col, z: zNW};
+            let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
+
+            ctx.save();
+            const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
+                // Se todo o triângulo estiver grudado no chão do lado de fora, a gente ignora.
+                if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1 && p3_3d.z <= 0.1) return;
+
+                let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
+                if (overlay === 'rgba(0,0,0,0)') return;
+
+                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
+                ctx.fillStyle = roofColor; ctx.fill();
+                ctx.fillStyle = overlay; ctx.fill();
+                ctx.strokeStyle = roofColor; ctx.lineWidth = 0.5; ctx.stroke();
+            };
+
+            // Desenha os 8 fragmentos da malha em cima da célula
+            drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
+            drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
+            drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
+            drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
+            drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
+            drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
+            drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
+            drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+            
+            ctx.restore();
+        }
     }
 
     if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
@@ -649,7 +716,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools) {
+    if (showActiveTools && renderPass === 1) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -680,8 +747,9 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // A MÁGICA DA OCLUSÃO (Z-SORTING ABSOLUTO): Cria uma fila matemática de todo o prédio.
-    // Assim, uma parede da frente ESMAGA o telhado de trás sem vazar nada.
+    // A MÁGICA DA OCLUSÃO ISOMÉTRICA!
+    // As células são desenhadas DE TRÁS PARA FRENTE de forma integral. A parede do 2º andar desenha 
+    // POR CIMA do teto do 1º andar.
     let renderQueue = [];
     for (const f of floors) {
         if (currentFloor < 0 && f >= 0) continue;
@@ -702,7 +770,8 @@ function drawIsometricGrid() {
     });
 
     for (const cell of renderQueue) {
-        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor);
+        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 0);
+        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 1);
     }
 
     ctx.restore();
