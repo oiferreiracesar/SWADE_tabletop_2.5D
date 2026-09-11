@@ -138,8 +138,8 @@ function precalculateRooms() {
     }
 }
 
-// O CÁLCULO MESTRE 3D (Medial Axis / Campo de Distância)
-// Em vez de "caixas de ovo", calcula a altura exata de qualquer vértice baseada na distância do quintal.
+// O CÁLCULO MESTRE 3D: Campo de Distância Verdadeiro (Medial Axis / Straight Skeleton)
+// Calcula a altura (Z) de qualquer vértice avaliando a distância dele para fora da casa.
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
     for (let r = -2; r <= 11; r++) {
@@ -165,21 +165,29 @@ function getRoofZ(fIndex, x, y, pitch) {
     return minDist * pitch;
 }
 
-// SHADER DE INCLINAÇÃO (Normal Mapping Matemático)
-// Calcula a direção exata para a qual o triângulo aponta e pinta a sombra correspondente, criando a união lisa perfeita.
+// SHADER 3D MATEMÁTICO: Calcula a direção do triângulo para pintá-lo com sombra precisa.
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
-    if (Math.abs(det) < 0.001) return 'rgba(255,255,255,0.05)';
-    
-    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det;
-    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det;
-    
-    let threshold = 0.5;
-    if (a > threshold) return 'rgba(0,0,0,0.1)'; // Encosta Nordeste
-    if (a < -threshold) return 'rgba(255,255,255,0.15)'; // Encosta Sudoeste (Sol)
-    if (b > threshold) return 'rgba(0,0,0,0.3)'; // Encosta Noroeste
-    if (b < -threshold) return 'rgba(0,0,0,0.4)'; // Encosta Sudeste (Sombra Forte)
-    return 'rgba(255,255,255,0.05)'; // Laje/Cume
+    if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
+
+    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; // Inclinação X
+    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; // Inclinação Y
+
+    let eps = 0.01;
+    let nx = -a; 
+    let ny = -b;
+
+    if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; // Face Sudoeste (Sol)
+    if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; // Face Nordeste
+    if (Math.abs(nx) <= eps && ny > eps) return 'rgba(0,0,0,0.4)'; // Face Sudeste (Sombra Forte)
+    if (Math.abs(nx) <= eps && ny < -eps) return 'rgba(0,0,0,0.25)'; // Face Noroeste
+
+    if (nx > eps && ny > eps) return 'rgba(0,0,0,0.15)'; // Quina Sul
+    if (nx > eps && ny < -eps) return 'rgba(255,255,255,0.05)'; // Quina Oeste
+    if (nx < -eps && ny > eps) return 'rgba(0,0,0,0.3)'; // Quina Leste
+    if (nx < -eps && ny < -eps) return 'rgba(0,0,0,0.2)'; // Quina Norte
+
+    return 'rgba(255,255,255,0.05)'; // Cumeeira plana
 }
 
 function isFloorSupported(r, c) {
@@ -567,43 +575,64 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
 
-    // O CÁLCULO MESTRE DO TELHADO (Medial Axis + Shader Matemático)
+    // MALHA 3D DO TELHADO (Com Campo de Distância)
     if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         
-        // Mede a distância geométrica real até o quintal para os cantos e o centro da célula
+        // Mede a distância das pontas e do centro para formar as águas-furtadas contínuas do L e do U
         let zN = getRoofZ(fIndex, row, col, roofPitch);
+        let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
         let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
+        let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
         let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
+        let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
         let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
+        let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
         let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
 
-        // Converte as alturas para as coordenadas de tela
-        let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
-        let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
-        let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
-        let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
-        let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
-
-        // Pontos abstratos de matemática 3D puros para alimentar o Shader
+        // Pontos abstratos de matemática 3D para o Shader
         let pN_3d = {x: row, y: col, z: zN};
+        let pNE_3d = {x: row, y: col + 0.5, z: zNE};
         let pE_3d = {x: row, y: col + 1, z: zE};
+        let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
         let pS_3d = {x: row + 1, y: col + 1, z: zS};
+        let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
         let pW_3d = {x: row + 1, y: col, z: zW};
+        let pNW_3d = {x: row + 0.5, y: col, z: zNW};
         let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
+
+        // Projeta os vértices para o 2D final na tela
+        let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
+        let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
+        let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
+        let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
+        let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
+        let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
+        let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
+        let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
+        let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
 
         ctx.save();
         const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
             let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
-            ctx.fillStyle = roofColor;
-            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); ctx.fill();
+            if (overlay === 'rgba(0,0,0,0)') return;
+
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
+            ctx.fillStyle = roofColor; ctx.fill();
             ctx.fillStyle = overlay; ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 0.5; ctx.stroke();
+            
+            ctx.strokeStyle = roofColor; ctx.lineWidth = 1.0; ctx.stroke();
+            ctx.strokeStyle = overlay; ctx.stroke();
         };
 
-        drawMicroTri(t_pN, t_pW, t_pC, pN_3d, pW_3d, pC_3d); 
-        drawMicroTri(t_pN, t_pE, t_pC, pN_3d, pE_3d, pC_3d); 
-        drawMicroTri(t_pW, t_pS, t_pC, pW_3d, pS_3d, pC_3d); 
-        drawMicroTri(t_pE, t_pS, t_pC, pE_3d, pS_3d, pC_3d); 
+        // Constrói os 8 fragmentos que formam a junção contínua da célula
+        drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
+        drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
+        drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
+        drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
+        drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
+        drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
+        drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
+        drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
         
         ctx.restore();
     }
@@ -651,8 +680,8 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // A MÁGICA DA OCLUSÃO (Z-SORTING ABSOLUTO): Cria uma fila e processa rigorosamente de trás para frente.
-    // Isso garante que a parede do Piso 1 desenhe por cima do telhado do Térreo, cravando na linha laranja!
+    // A MÁGICA DA OCLUSÃO (Z-SORTING ABSOLUTO): Cria uma fila matemática de todo o prédio.
+    // Assim, uma parede da frente ESMAGA o telhado de trás sem vazar nada.
     let renderQueue = [];
     for (const f of floors) {
         if (currentFloor < 0 && f >= 0) continue;
