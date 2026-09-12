@@ -2,96 +2,194 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>RPG Isométrico - Construtor</title>
-    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engine Isométrica 2.5D - Construtor</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0f172a; /* Fundo geral */
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Painel Lateral de UI */
+        #ui-panel {
+            width: 260px;
+            background-color: #1e293b;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        h2 {
+            font-size: 1.1rem;
+            margin: 0 0 15px 0;
+            border-bottom: 2px solid #334155;
+            padding-bottom: 8px;
+            color: #94a3b8;
+        }
+
+        .tool-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 25px;
+        }
+
+        button {
+            background-color: #334155;
+            color: #f8fafc;
+            border: 1px solid #475569;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            text-align: left;
+            transition: 0.2s;
+        }
+
+        button:hover { background-color: #475569; }
+        
+        button.active {
+            background-color: #3b82f6;
+            border-color: #60a5fa;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* Controles de Andar */
+        .floor-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #0f172a;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+        }
+        .floor-controls button { padding: 5px 12px; text-align: center; }
+        #floorLabel { font-size: 0.85rem; font-weight: bold; text-align: center; }
+
+        /* Controles Deslizantes e Menus */
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+        }
+        
+        select {
+            background-color: #334155;
+            color: white;
+            border: 1px solid #475569;
+            padding: 6px;
+            border-radius: 4px;
+            width: 100%;
+        }
+
+        /* Seletores de Cor */
+        .color-picker {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+        }
+        .color-picker input[type="color"] {
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            background: none;
+        }
+
+        /* Canvas de Renderização */
+        #gameCanvas {
+            flex-grow: 1;
+            cursor: crosshair;
+            display: block;
+        }
+    </style>
 </head>
 <body>
-    <div id="sidebar">
-        <h2>Modo Construção</h2>
+
+    <div id="ui-panel">
         
-        <div class="tool-section">
-            <h3>Ferramentas Básicas</h3>
-            <button id="btnPiso" class="tool-btn active">Piso (1)</button>
-            <button id="btnParede" class="tool-btn">Parede Flex (2)</button>
-            <button id="btnColuna" class="tool-btn">Coluna (6)</button>
-            <button id="btnBorracha" class="tool-btn">Borracha (Segure Ctrl)</button>
+        <!-- NAVEGAÇÃO DE ANDARES -->
+        <div class="floor-controls">
+            <button id="btnFloorDown" title="Descer Andar">▼</button>
+            <span id="floorLabel">Andar Atual: Térreo (0)</span>
+            <button id="btnFloorUp" title="Subir Andar">▲</button>
         </div>
 
-        <div class="tool-section">
-            <h3>Cômodos Prontos</h3>
-            <button id="btnRoomRect" class="tool-btn">Sala Retangular (3)</button>
-            <button id="btnRoomTri" class="tool-btn">Sala Triangular (4)</button>
-            <button id="btnRoomOct" class="tool-btn">Sala Octogonal (5)</button>
+        <!-- CONSTRUÇÃO -->
+        <h2>Ferramentas</h2>
+        <div class="tool-group">
+            <button id="btnPiso" class="active">Piso (1)</button>
+            <button id="btnParede">Parede Simples (2)</button>
+            <button id="btnRoomRect">Cômodo Retangular (3)</button>
+            <button id="btnColuna">Coluna de Apoio (6)</button>
         </div>
 
-        <div class="tool-section">
-            <h3>Navegação de Andares</h3>
-            <div style="display: flex; gap: 5px;">
-                <button id="btnFloorDown" style="flex: 1; text-align: center;">↓ Descer</button>
-                <button id="btnFloorUp" style="flex: 1; text-align: center;">↑ Subir</button>
-            </div>
-            <p id="floorLabel" style="font-size: 13px; color: #38bdf8; margin: 8px 0 0 0; font-weight: bold;">
-                Andar Atual: Térreo (0)
-            </p>
+        <!-- MODIFICADORES -->
+        <h2>Ações</h2>
+        <div class="tool-group">
+            <button id="btnBorracha">Apagar (Segurar Ctrl)</button>
+            <button id="btnCutaway">Paredes: CORTADAS (C)</button>
+            <button id="btnUndo">Desfazer (Ctrl+Z)</button>
         </div>
 
-        <div class="tool-section">
-            <h3>Altura da Parede: <span id="valorAltura">48</span>px</h3>
-            <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">
+        <!-- CONFIGURAÇÕES DE GEOMETRIA -->
+        <h2>Geometria</h2>
+        <div class="slider-group">
+            <label for="sliderAltura">Altura das Paredes: <strong id="valorAltura">48</strong></label>
+            <input type="range" id="sliderAltura" min="12" max="96" value="48">
         </div>
-
-        <!-- ATUALIZADO: Dropdown cravado nas alturas que você pediu -->
-        <div class="tool-section">
-            <h3>Inclinação do Telhado</h3>
-            <select id="roofPitchSelect" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                <option value="6">Baixa (6px)</option>
-                <option value="12">Média (12px)</option>
-                <option value="24" selected>Alta (24px - Metade da Parede)</option>
+        <div class="slider-group">
+            <label for="roofPitchSelect">Inclinação do Telhado</label>
+            <select id="roofPitchSelect">
+                <option value="6">Baixo (Estilo Moderno)</option>
+                <option value="12">Médio (Padrão)</option>
+                <option value="24" selected>Alto (Clássico)</option>
             </select>
         </div>
 
-        <div class="tool-section">
-            <h3>Cores do Cenário</h3>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Superfície: 
-                    <input type="color" id="colorSurface" value="#1e293b" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Fundo Subsolo: 
-                    <input type="color" id="colorUnderground" value="#0a0705" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Terra Maciça: 
-                    <input type="color" id="colorDirt" value="#1e140f" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Cor do Telhado: 
-                    <input type="color" id="colorRoof" value="#475569" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-            </div>
+        <!-- MATERIAIS / CORES -->
+        <h2>Materiais</h2>
+        <div class="color-picker">
+            <span>Grama / Chão:</span>
+            <input type="color" id="colorSurface" value="#1e293b">
+        </div>
+        <div class="color-picker">
+            <span>Terra (Vazio):</span>
+            <input type="color" id="colorDirt" value="#1e140f">
+        </div>
+        <div class="color-picker">
+            <span>Chão Subsolo:</span>
+            <input type="color" id="colorUnderground" value="#0a0705">
+        </div>
+        <div class="color-picker">
+            <span>Telhado:</span>
+            <input type="color" id="colorRoof" value="#475569">
         </div>
 
-        <div class="tool-section">
-            <h3>Configurações Visuais</h3>
-            <button id="btnCutaway" class="action-btn">Paredes: CORTADAS (C)</button>
-        </div>
-
-        <div class="tool-section">
-            <h3>Controles de Projeto</h3>
-            <button id="btnUndo" class="action-btn">Desfazer Ação (Ctrl+Z)</button>
-        </div>
-
-        <div id="instructions">
-            <p><strong>Arraste o mouse:</strong> Criar linhas/áreas</p>
-            <p><strong>Shift + Clique:</strong> Preencher cômodo</p>
-        </div>
     </div>
 
-    <div id="canvas-container">
-        <canvas id="gameCanvas"></canvas>
-    </div>
+    <!-- O motor visual -->
+    <canvas id="gameCanvas"></canvas>
 
+    <!-- Conexão com a nossa Engine JS -->
     <script src="script.js"></script>
 </body>
 </html>
