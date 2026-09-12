@@ -138,8 +138,7 @@ function precalculateRooms() {
     }
 }
 
-// O CÁLCULO MESTRE 3D RESGATADO: Campo de Distância de Chebyshev
-// Faz os telhados de "L", "C" e "U" convergirem e se moldarem sem Bounding Box!
+// O CÁLCULO MESTRE 3D: Campo de Distância de Chebyshev (Forma os L, U e C perfeitamente)
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
     for (let r = -2; r <= 11; r++) {
@@ -165,7 +164,7 @@ function getRoofZ(fIndex, x, y, pitch) {
     return minDist * pitch;
 }
 
-// O SHADER MATEMÁTICO: Oculta as divisões do grid calculando a luz do Sol
+// SHADER DE LUZ 3D
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
     if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
@@ -177,18 +176,17 @@ function getTriangleShade(p1, p2, p3) {
     let nx = -a; 
     let ny = -b;
 
-    if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; // Face Sol
+    if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; 
     if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; 
-    if (Math.abs(nx) <= eps && ny > eps) return 'rgba(0,0,0,0.4)'; // Face Sombra Forte
+    if (Math.abs(nx) <= eps && ny > eps) return 'rgba(0,0,0,0.4)'; 
     if (Math.abs(nx) <= eps && ny < -eps) return 'rgba(0,0,0,0.25)'; 
 
-    // Quinas (Águas-furtadas)
     if (nx > eps && ny > eps) return 'rgba(0,0,0,0.15)';
     if (nx > eps && ny < -eps) return 'rgba(255,255,255,0.05)';
     if (nx < -eps && ny > eps) return 'rgba(0,0,0,0.3)';
     if (nx < -eps && ny < -eps) return 'rgba(0,0,0,0.2)';
 
-    return 'rgba(255,255,255,0.05)'; // Cumeeira Plana
+    return 'rgba(255,255,255,0.05)'; 
 }
 
 function isFloorSupported(r, c) {
@@ -396,16 +394,18 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     } 
 
-    // FASE 1: O RETORNO DA MEDIAL AXIS (A fórmula mágica para o "L", "U" e "C")
+    // FASE 1: O RETORNO DA MEDIAL AXIS + O PREENCHIMENTO DO BURACO (SAIAS VERTICAIS)
     else if (renderPass === 1) {
         let hideLowerRoof = false;
         if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
             hideLowerRoof = true;
         }
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && (enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0) && !hasStructureAbove(fIndex, row, col)) {
+        let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
+
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
             
-            // Mede a distância das pontas e do centro (Chebyshev Math!)
+            // Distância para as bordas reais do andar!
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
             let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
@@ -416,7 +416,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
             let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
 
-            // Transfere pro 2D 
             let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
             let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
             let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
@@ -439,7 +438,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             ctx.save();
             
-            // Oculta eventuais derramamentos sutis da calha
+            // Oculta derramamentos visuais
             ctx.beginPath();
             ctx.moveTo(pSul.x, pSul.y - blockHeight); 
             ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
@@ -450,6 +449,52 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.closePath();
             ctx.clip();
 
+            // A MÁGICA DO PREENCHIMENTO: A Saia Vertical (Skirt) 
+            // Fecha qualquer buraco deixado pela oclusão do 2º andar!
+            let neighborHasRoof = (r, c) => {
+                if (r < 0 || r >= 10 || c < 0 || c >= 10) return false;
+                let ind = enclosedCache[`${fIndex},${r},${c}`] || mapData[fIndex][r][c].floor > 0;
+                return ind && !hasStructureAbove(fIndex, r, c);
+            };
+
+            const drawSkirt = (p1_2d, p2_2d, p1_3d, p2_3d, overlay) => {
+                if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1) return; // Se está liso no teto, não precisa de parede.
+                
+                ctx.fillStyle = roofColor;
+                ctx.beginPath();
+                ctx.moveTo(p1_2d.x, p1_2d.y); // Quina Esquerda da Lona
+                ctx.lineTo(p2_2d.x, p2_2d.y); // Quina Direita da Lona
+                ctx.lineTo(p2_2d.x, p2_2d.y + p2_3d.z); // Desce até o teto (bloco)
+                ctx.lineTo(p1_2d.x, p1_2d.y + p1_3d.z); // Desce até o teto (bloco)
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.fillStyle = overlay;
+                ctx.fill();
+                
+                ctx.strokeStyle = roofColor;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            };
+
+            // Se o vizinho estiver bloqueado pelo 2º andar, desenhamos uma cortina de fechamento 
+            if (!neighborHasRoof(row - 1, col)) { // Parede Norte
+                drawSkirt(t_pNW, t_pN, pNW_3d, pN_3d, 'rgba(0,0,0,0.1)');
+                drawSkirt(t_pN, t_pNE, pN_3d, pNE_3d, 'rgba(0,0,0,0.1)');
+            }
+            if (!neighborHasRoof(row, col + 1)) { // Parede Leste
+                drawSkirt(t_pNE, t_pE, pNE_3d, pE_3d, 'rgba(0,0,0,0.4)');
+                drawSkirt(t_pE, t_pSE, pE_3d, pSE_3d, 'rgba(0,0,0,0.4)');
+            }
+            if (!neighborHasRoof(row + 1, col)) { // Parede Sul
+                drawSkirt(t_pSE, t_pS, pSE_3d, pS_3d, 'rgba(255,255,255,0.15)');
+                drawSkirt(t_pS, t_pSW, pS_3d, pSW_3d, 'rgba(255,255,255,0.15)');
+            }
+            if (!neighborHasRoof(row, col - 1)) { // Parede Oeste
+                drawSkirt(t_pSW, t_pW, pSW_3d, pW_3d, 'rgba(0,0,0,0.3)');
+                drawSkirt(t_pW, t_pNW, pW_3d, pNW_3d, 'rgba(0,0,0,0.3)');
+            }
+
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
                 if (overlay === 'rgba(0,0,0,0)') return;
@@ -458,11 +503,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.fillStyle = roofColor; ctx.fill();
                 ctx.fillStyle = overlay; ctx.fill();
                 
-                // O REMÉDIO PARA A CAIXA DE OVO: O stroke sela as frestas com a cor exata do triângulo!
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
                 ctx.strokeStyle = overlay; ctx.lineWidth = 1; ctx.stroke();
             };
 
+            // Desenha a lona principal por cima do preenchimento
             drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
             drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
             drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
