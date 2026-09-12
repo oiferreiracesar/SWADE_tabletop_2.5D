@@ -613,7 +613,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         hideLowerRoof = true;
     }
 
-    // O RETORNO DA PIRÂMIDE GIGANTE (Com a sua ideia genial de corte por tipo de chão!)
+    // O RETORNO DA PIRÂMIDE GIGANTE CORRIGIDA (Bounding Box)
     if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
         const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
         
@@ -631,53 +631,28 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let midC = (bounds.minC + bounds.maxC + 1) / 2;
         let peak = gridToScreen(midR, midC);
         
-        // Mantendo o ajuste do / 2 para travar perfeitamente na linha laranja (Metade da parede)
-        let size = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1);
-        let roofHeight = (size / 2) * roofPitch;
+        let roofHeight = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1) * roofPitch;
         peak.y -= (blockHeight + roofHeight);
 
-        // A MÁSCARA INTELIGENTE: Pega o tipo de piso e corta a sobra!
+        // A GUILHOTINA ISOMÉTRICA (Agora inteligente, baseada no formato do chão!)
         ctx.save();
         let ft = targetMap[row][col].floor;
+        let pts = [];
+
+        if (ft === 2) pts = [pNorte, pLeste, pOeste];
+        else if (ft === 3) pts = [pSul, pOeste, pLeste];
+        else if (ft === 4) pts = [pOeste, pNorte, pSul];
+        else if (ft === 5) pts = [pLeste, pSul, pNorte];
+        else pts = [pSul, pLeste, pNorte, pOeste];
+
         ctx.beginPath();
-        
-        if (ft === 2) {
-            ctx.moveTo(pOeste.x, pOeste.y - blockHeight); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
-        } else if (ft === 3) {
-            ctx.moveTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
-        } else if (ft === 4) {
-            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight);
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
-        } else if (ft === 5) {
-            ctx.moveTo(pNorte.x, pNorte.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pSul.x, pSul.y - blockHeight);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
-        } else {
-            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
+        ctx.moveTo(pts[0].x, pts[0].y - blockHeight);
+        for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y - blockHeight);
         }
-        
+        for (let i = pts.length - 1; i >= 0; i--) {
+            ctx.lineTo(pts[i].x, pts[i].y - blockHeight - 2000);
+        }
         ctx.closePath();
         ctx.clip(); 
 
