@@ -36,7 +36,6 @@ let mapData = {};
 let map; 
 
 let enclosedCache = {};
-let roomBoundsCache = {};
 
 function createEmptyMap() {
     const newMap = [];
@@ -129,54 +128,66 @@ function isEnclosed(fIndex, startRow, startCol) {
 
 function precalculateRooms() {
     enclosedCache = {};
-    roomBoundsCache = {};
     const floors = Object.keys(mapData).map(Number);
-    
     for (const f of floors) {
         for (let r = 0; r < 10; r++) {
             for (let c = 0; c < 10; c++) {
                 enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
             }
         }
-        
-        const visited = new Set();
-        for (let r = 0; r < 10; r++) {
-            for (let c = 0; c < 10; c++) {
-                if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
-                    let minR = r, maxR = r, minC = c, maxC = c;
-                    const queue = [{r, c}];
-                    const roomCells = [];
-                    visited.add(`${r},${c}`);
-                    
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        roomCells.push(curr);
-                        minR = Math.min(minR, curr.r);
-                        maxR = Math.max(maxR, curr.r);
-                        minC = Math.min(minC, curr.c);
-                        maxC = Math.max(maxC, curr.c);
-                        
-                        const neighbors = [
-                            {r: curr.r-1, c: curr.c}, {r: curr.r+1, c: curr.c},
-                            {r: curr.r, c: curr.c-1}, {r: curr.r, c: curr.c+1}
-                        ];
-                        for (let n of neighbors) {
-                            if (n.r >= 0 && n.r < 10 && n.c >= 0 && n.c < 10) {
-                                if (!visited.has(`${n.r},${n.c}`) && enclosedCache[`${f},${n.r},${n.c}`]) {
-                                    visited.add(`${n.r},${n.c}`);
-                                    queue.push(n);
-                                }
-                            }
-                        }
-                    }
-                    const bounds = {minR, maxR, minC, maxC};
-                    for (let cell of roomCells) {
-                        roomBoundsCache[`${f},${cell.r},${cell.c}`] = bounds;
-                    }
-                }
+    }
+}
+
+// O CÁLCULO MESTRE 3D: Campo de Distância Verdadeiro (Medial Axis / Straight Skeleton)
+// Calcula a altura (Z) de qualquer vértice avaliando a distância dele para fora da casa.
+function getRoofZ(fIndex, x, y, pitch) {
+    let minDist = Infinity;
+    for (let r = -2; r <= 11; r++) {
+        for (let c = -2; c <= 11; c++) {
+            let isEnclosedCell = false;
+            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
+            }
+            if (!isEnclosedCell) {
+                let dx = 0;
+                if (x < r) dx = r - x;
+                else if (x > r + 1) dx = x - (r + 1);
+                
+                let dy = 0;
+                if (y < c) dy = c - y;
+                else if (y > c + 1) dy = y - (c + 1);
+                
+                let dist = Math.max(dx, dy);
+                if (dist < minDist) minDist = dist;
             }
         }
     }
+    return minDist * pitch;
+}
+
+// SHADER 3D MATEMÁTICO: Calcula a direção do triângulo para pintá-lo com sombra precisa.
+function getTriangleShade(p1, p2, p3) {
+    let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
+    if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
+
+    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; // Inclinação X
+    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; // Inclinação Y
+
+    let eps = 0.01;
+    let nx = -a; 
+    let ny = -b;
+
+    if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; // Face Sudoeste (Sol)
+    if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; // Face Nordeste
+    if (Math.abs(nx) <= eps && ny > eps) return 'rgba(0,0,0,0.4)'; // Face Sudeste (Sombra Forte)
+    if (Math.abs(nx) <= eps && ny < -eps) return 'rgba(0,0,0,0.25)'; // Face Noroeste
+
+    if (nx > eps && ny > eps) return 'rgba(0,0,0,0.15)'; // Quina Sul
+    if (nx > eps && ny < -eps) return 'rgba(255,255,255,0.05)'; // Quina Oeste
+    if (nx < -eps && ny > eps) return 'rgba(0,0,0,0.3)'; // Quina Leste
+    if (nx < -eps && ny < -eps) return 'rgba(0,0,0,0.2)'; // Quina Norte
+
+    return 'rgba(255,255,255,0.05)'; // Cumeeira plana
 }
 
 function isFloorSupported(r, c) {
@@ -472,7 +483,7 @@ function updatePreview() {
     }
 }
 
-function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
+function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
 
@@ -485,156 +496,145 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     const pSul   = gridToScreen(row + 1, col + 1);
     const pOeste = gridToScreen(row + 1, col);
 
-    if (renderPass === 0) {
-        const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+    const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+    
+    let shouldDrawGrid = false;
+    if (fIndex === currentFloor) {
+        if (currentFloor <= 0) shouldDrawGrid = true; 
+        else shouldDrawGrid = hasContent || isFloorSupported(row, col); 
+    } else if (fIndex < currentFloor) {
+        shouldDrawGrid = hasContent;
+    } else if (fIndex > currentFloor) {
+        shouldDrawGrid = false;
+    }
+
+    let isDirt = false;
+    if (fIndex <= 0) {
+        if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
+            isDirt = true;
+        }
+    }
+
+    if (isDirt) {
+        ctx.fillStyle = dirtColor; 
+        ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+        ctx.closePath(); ctx.fill();
+    } else if (targetMap[row][col].floor > 0) {
+        ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
+        ctx.beginPath();
+        if (targetMap[row][col].floor === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+        else if (targetMap[row][col].floor === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+        else if (targetMap[row][col].floor === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
+        else if (targetMap[row][col].floor === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
+        else if (targetMap[row][col].floor === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
+        ctx.closePath(); ctx.fill(); 
+    }
+    
+    if (shouldDrawGrid) {
+        ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+        ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
+    }
+
+    if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+        const supp = isFloorSupported(row, col);
+        const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
+        ctx.beginPath();
+        if (previewType === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+        else if (previewType === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+        else if (previewType === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
+        else if (previewType === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
+        else if (previewType === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
+        ctx.closePath();
+        ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
+        ctx.fill();
+    }
+
+    let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
+    let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
+    if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
+    if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
+
+    let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
+    let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
+    if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
+    if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
+
+    if (targetMap[row][col].column === 1) {
+        let colH = applyCutaway ? cutawayHeight : blockHeight;
+        const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
         
-        let shouldDrawGrid = false;
-        if (fIndex === currentFloor) {
-            if (currentFloor <= 0) shouldDrawGrid = true; 
-            else shouldDrawGrid = hasContent || isFloorSupported(row, col); 
-        } else if (fIndex < currentFloor) {
-            shouldDrawGrid = hasContent;
-        } else if (fIndex > currentFloor) {
-            shouldDrawGrid = false;
-        }
-
-        let isDirt = false;
-        if (fIndex <= 0) {
-            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
-                isDirt = true;
-            }
-        }
-
-        if (isDirt) {
-            ctx.fillStyle = dirtColor; 
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.fill();
-        } else if (targetMap[row][col].floor > 0) {
-            ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
-            ctx.beginPath();
-            if (targetMap[row][col].floor === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-            else if (targetMap[row][col].floor === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-            else if (targetMap[row][col].floor === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
-            else if (targetMap[row][col].floor === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
-            else if (targetMap[row][col].floor === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
-            ctx.closePath(); ctx.fill(); 
-        }
+        ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
+        ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
         
-        if (shouldDrawGrid) {
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
-        }
+        ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
+        ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
+        
+        ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
+        ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
 
-        if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
-            const supp = isFloorSupported(row, col);
-            const previewType = getFloorType(row, col, 'CLICK', hoverQuadrant);
-            ctx.beginPath();
-            if (previewType === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-            else if (previewType === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-            else if (previewType === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
-            else if (previewType === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
-            else if (previewType === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
-            ctx.closePath();
-            ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
-            ctx.fill();
-        }
+    let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
 
-        let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
-        let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
-        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
-        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
+    // MALHA 3D DO TELHADO (Com Campo de Distância)
+    if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+        
+        // Mede a distância das pontas e do centro para formar as águas-furtadas contínuas do L e do U
+        let zN = getRoofZ(fIndex, row, col, roofPitch);
+        let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
+        let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
+        let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
+        let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
+        let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
+        let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
+        let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
+        let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
 
-        let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
-        let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
-        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
-        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
+        // Pontos abstratos de matemática 3D para o Shader
+        let pN_3d = {x: row, y: col, z: zN};
+        let pNE_3d = {x: row, y: col + 0.5, z: zNE};
+        let pE_3d = {x: row, y: col + 1, z: zE};
+        let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
+        let pS_3d = {x: row + 1, y: col + 1, z: zS};
+        let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
+        let pW_3d = {x: row + 1, y: col, z: zW};
+        let pNW_3d = {x: row + 0.5, y: col, z: zNW};
+        let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
 
-        if (targetMap[row][col].column === 1) {
-            let colH = applyCutaway ? cutawayHeight : blockHeight;
-            const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
+        // Projeta os vértices para o 2D final na tela
+        let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
+        let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
+        let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
+        let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
+        let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
+        let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
+        let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
+        let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
+        let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
+
+        ctx.save();
+        const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
+            let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
+            if (overlay === 'rgba(0,0,0,0)') return;
+
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
+            ctx.fillStyle = roofColor; ctx.fill();
+            ctx.fillStyle = overlay; ctx.fill();
             
-            ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
-            ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
-            
-            ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
-            ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
-            
-            ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
-            ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
-        }
-    } 
-    // FASE 1: O TELHADO ORIGINAL, BONITO E SÓLIDO (COM O RECORTE DIAGONAL)
-    else if (renderPass === 1) {
-        let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
+            ctx.strokeStyle = roofColor; ctx.lineWidth = 1.0; ctx.stroke();
+            ctx.strokeStyle = overlay; ctx.stroke();
+        };
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
-            const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
-            
-            let c_pN = gridToScreen(bounds.minR, bounds.minC);
-            let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1);
-            let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1);
-            let c_pW = gridToScreen(bounds.maxR + 1, bounds.minC);
-            
-            c_pN.y -= blockHeight;
-            c_pE.y -= blockHeight;
-            c_pS.y -= blockHeight;
-            c_pW.y -= blockHeight;
-
-            let midR = (bounds.minR + bounds.maxR + 1) / 2;
-            let midC = (bounds.minC + bounds.maxC + 1) / 2;
-            let peak = gridToScreen(midR, midC);
-            
-            let size = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1);
-            let roofHeight = (size / 2) * roofPitch;
-            peak.y -= (blockHeight + roofHeight);
-
-            ctx.save();
-            let ft = targetMap[row][col].floor;
-            
-            // A MÁSCARA DIAGONAL: Exatamente o que você pediu. Corta a sobra da lona no formato da parede diagonal.
-            ctx.beginPath();
-            if (ft === 2) {
-                ctx.moveTo(pOeste.x, pOeste.y - blockHeight); ctx.lineTo(pNorte.x, pNorte.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-                ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
-            } else if (ft === 3) {
-                ctx.moveTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
-                ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
-            } else if (ft === 4) {
-                ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); ctx.lineTo(pNorte.x, pNorte.y - blockHeight);
-                ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
-            } else if (ft === 5) {
-                ctx.moveTo(pNorte.x, pNorte.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pSul.x, pSul.y - blockHeight);
-                ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
-            } else {
-                ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-                ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
-            }
-            ctx.closePath();
-            ctx.clip(); 
-
-            // Os 4 grandes painéis lisos originais (Sem a maldita "Caixa de Ovo")
-            const drawTri = (p1, p2, p3, overlay) => {
-                ctx.fillStyle = roofColor;
-                ctx.beginPath(); 
-                ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); 
-                ctx.closePath(); 
-                ctx.fill();
-                
-                ctx.fillStyle = overlay; 
-                ctx.fill();
-                
-                ctx.strokeStyle = 'rgba(0,0,0,0.15)'; 
-                ctx.lineWidth = 1; 
-                ctx.stroke();
-            };
-
-            drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); 
-            drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); 
-            drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); 
-            drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); 
-
-            ctx.restore(); 
-        }
+        // Constrói os 8 fragmentos que formam a junção contínua da célula
+        drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
+        drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
+        drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
+        drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
+        drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
+        drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
+        drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
+        drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+        
+        ctx.restore();
     }
 
     if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
@@ -649,7 +649,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
     }
 
-    if (showActiveTools && renderPass === 1) {
+    if (showActiveTools) {
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
@@ -680,6 +680,8 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
+    // A MÁGICA DA OCLUSÃO (Z-SORTING ABSOLUTO): Cria uma fila matemática de todo o prédio.
+    // Assim, uma parede da frente ESMAGA o telhado de trás sem vazar nada.
     let renderQueue = [];
     for (const f of floors) {
         if (currentFloor < 0 && f >= 0) continue;
@@ -700,8 +702,7 @@ function drawIsometricGrid() {
     });
 
     for (const cell of renderQueue) {
-        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 0);
-        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 1);
+        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor);
     }
 
     ctx.restore();
