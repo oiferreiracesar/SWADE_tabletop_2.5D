@@ -1,16 +1,13 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const container = document.getElementById('canvas-container');
 
 const tileWidth = 64;
 const tileHeight = 32;
 
-// Alterado para 'let' para que a tela possa ser responsiva
+// O Ponto Zero dinâmico (necessário para a tela responsiva)
 let originX = 0; 
 let originY = 100;
-
-const levelHeight = 48; 
-let blockHeight = 48; 
-const cutawayHeight = 12;
 
 const levelHeight = 48; 
 let blockHeight = 48; 
@@ -312,7 +309,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     if (!targetMap || !targetMap[row]) return;
 
     ctx.save();
-    
     const distance = fIndex - currentFloor;
     ctx.translate(0, -distance * levelHeight);
 
@@ -325,14 +321,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
         
         let shouldDrawGrid = false;
-
         if (fIndex === currentFloor) {
-            if (currentFloor <= 0) {
-                shouldDrawGrid = true; 
-            } else {
-                const supp = isFloorSupported(row, col);
-                shouldDrawGrid = hasContent || supp; 
-            }
+            if (currentFloor <= 0) shouldDrawGrid = true; 
+            else shouldDrawGrid = hasContent || isFloorSupported(row, col); 
         } else if (fIndex < currentFloor) {
             shouldDrawGrid = hasContent;
         } else if (fIndex > currentFloor) {
@@ -348,24 +339,18 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
-            ctx.beginPath();
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
-            ctx.fill();
+            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.closePath(); ctx.fill();
         } else if (targetMap[row][col].floor > 0) {
             ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
             ctx.beginPath();
             ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
-            ctx.fill(); 
+            ctx.closePath(); ctx.fill(); 
         }
         
         if (shouldDrawGrid) {
-            ctx.beginPath();
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
-            ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); 
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
         }
 
         if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
@@ -373,55 +358,36 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.beginPath();
             ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath();
-            
-            if (!supp && !activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.3)';
-            else if (activeEraseMode) ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
-            else ctx.fillStyle = 'rgba(100, 255, 100, 0.2)';
+            ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
             ctx.fill();
         }
 
-        let hL = targetMap[row][col].wallL;
-        if (applyCutaway && hL > 0) hL = cutawayHeight;
-        let hR = targetMap[row][col].wallR;
-        if (applyCutaway && hR > 0) hR = cutawayHeight;
-
+        let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
+        let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
         if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
         if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
 
-        let hWE = targetMap[row][col].wallWE;
-        if (applyCutaway && hWE > 0) hWE = cutawayHeight;
-        let hNS = targetMap[row][col].wallNS;
-        if (applyCutaway && hNS > 0) hNS = cutawayHeight;
-
+        let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
+        let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
         if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
         if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
 
         if (targetMap[row][col].column === 1) {
-            let colH = blockHeight;
-            if (applyCutaway) colH = cutawayHeight;
-            const cx = pNorte.x;
-            const cy = pNorte.y + (tileHeight / 2);
+            let colH = applyCutaway ? cutawayHeight : blockHeight;
+            const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
             
-            ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3';
-            ctx.strokeStyle = isGhost ? 'transparent' : '#555';
-            
-            ctx.beginPath();
-            ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
             
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
-            ctx.beginPath();
-            ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
             
             ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
-            ctx.beginPath();
-            ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
         }
     } 
 
-    // FASE 1: O TELHADO ORIGINAL, BONITO E SÓLIDO (Retangular clássico, sem bugs e sem frestas)
+    // FASE 1: O TELHADO ORIGINAL E RETANGULAR CLÁSSICO
     else if (renderPass === 1) {
         let hideLowerRoof = false;
         if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
@@ -451,7 +417,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             ctx.save();
             
-            // GUILHOTINA SIMPLES E ORTOGONAL (Limita o telhado perfeitamente ao seu tile 64x32)
+            // Recorte Base Ortogonal
             ctx.beginPath();
             ctx.moveTo(pSul.x, pSul.y - blockHeight); 
             ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
@@ -462,7 +428,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.closePath();
             ctx.clip(); 
 
-            // Os 4 grandes painéis lisos originais
+            // Os 4 grandes painéis
             const drawTri = (p1, p2, p3, overlay) => {
                 ctx.fillStyle = roofColor;
                 ctx.beginPath(); 
@@ -489,14 +455,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
         const supp = isFloorSupported(row, col);
-        let colH = blockHeight;
-        if (applyCutaway) colH = cutawayHeight;
-        const cx = pNorte.x;
-        const cy = pNorte.y + (tileHeight / 2);
+        let colH = applyCutaway ? cutawayHeight : blockHeight;
+        const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
         
-        let ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-        if (!supp && !activeEraseMode) ghostColor = 'rgba(255, 50, 50, 0.4)'; 
-        
+        let ghostColor = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.4)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)'); 
         ctx.fillStyle = ghostColor;
         ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill();
@@ -508,11 +470,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
             const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-            
             ghosts.forEach(p => {
-                let hGhost = blockHeight;
-                if (applyCutaway) hGhost = cutawayHeight;
-
+                let hGhost = applyCutaway ? cutawayHeight : blockHeight;
                 if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
                 else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                 else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
@@ -628,12 +587,6 @@ function updateUI() {
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
-    // Remove classes/estados das ferramentas que foram deletadas, caso elas ainda existam no HTML
-    const btnTri = document.getElementById('btnRoomTri');
-    if (btnTri) btnTri.classList.remove('active');
-    const btnOct = document.getElementById('btnRoomOct');
-    if (btnOct) btnOct.classList.remove('active');
-
     let floorName = currentFloor === 0 ? "Térreo (0)" : (currentFloor > 0 ? `Superior (${currentFloor})` : `Subsolo (${currentFloor})`);
     document.getElementById('floorLabel').innerText = `Andar Atual: ${floorName}`;
 }
@@ -719,7 +672,6 @@ canvas.addEventListener('mousedown', (e) => {
     saveState(); 
 
     if (e.shiftKey) {
-        // Agora o Flood Fill apenas preenche quadradões inteiros (1)
         if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
         const visited = new Set();
@@ -842,7 +794,6 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    // Ferramentas 4 e 5 foram removidas dos atalhos
     if (['1','2','3','6'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
@@ -870,28 +821,23 @@ document.getElementById('btnParede').addEventListener('click', () => { currentBr
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
 
-// Evita crash se os botões não tiverem sido removidos do HTML ainda
-const btnTri = document.getElementById('btnRoomTri');
-if (btnTri) btnTri.addEventListener('click', () => { alert("Ferramenta descontinuada."); });
-const btnOct = document.getElementById('btnRoomOct');
-if (btnOct) btnOct.addEventListener('click', () => { alert("Ferramenta descontinuada."); });
-
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
     const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
     window.dispatchEvent(event);
 });
 
-// NOVA FUNÇÃO DE TELA: Mantém a resolução 1:1 com o monitor e o mouse
+// A REDIMENSÃO INTELIGENTE: Mantém o canvas perfeito dentro do espaço reservado
 function resizeCanvas() {
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-    originX = canvas.width / 2; // Recalcula o centro da tela perfeitamente
+    if (!container) return;
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+    originX = canvas.width / 2; // O centro da tela acompanha o navegador
     drawIsometricGrid();
 }
 
 window.addEventListener('resize', resizeCanvas);
 
-// Inicializa a UI e a Tela no tamanho correto
+// Chamadas iniciais para desenhar a primeira vez sem bugar
 updateUI();
 resizeCanvas();
