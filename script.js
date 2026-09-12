@@ -1,12 +1,16 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-canvas.width = 800;
-canvas.height = 600;
 
 const tileWidth = 64;
 const tileHeight = 32;
-const originX = canvas.width / 2;
-const originY = 100;
+
+// Alterado para 'let' para que a tela possa ser responsiva
+let originX = 0; 
+let originY = 100;
+
+const levelHeight = 48; 
+let blockHeight = 48; 
+const cutawayHeight = 12;
 
 const levelHeight = 48; 
 let blockHeight = 48; 
