@@ -387,7 +387,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     } 
 
-    // FASE 1: O TELHADO ORIGINAL E RETANGULAR CLÁSSICO
+    // FASE 1: O TELHADO FORMATO TENDA (Telhado de 4 Águas com Cumeeira)
     else if (renderPass === 1) {
         let hideLowerRoof = false;
         if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
@@ -407,17 +407,32 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             c_pS.y -= blockHeight;
             c_pW.y -= blockHeight;
 
-            let midR = (bounds.minR + bounds.maxR + 1) / 2;
-            let midC = (bounds.minC + bounds.maxC + 1) / 2;
-            let peak = gridToScreen(midR, midC);
+            // Largura (w) e Comprimento (h) da casa
+            let w = bounds.maxC - bounds.minC + 1;
+            let h = bounds.maxR - bounds.minR + 1;
             
-            let size = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1);
-            let roofHeight = (size / 2) * roofPitch;
-            peak.y -= (blockHeight + roofHeight);
+            // A profundidade define a distância da calha até a cumeeira (linha do topo)
+            let d = Math.min(w, h) / 2;
+            let roofHeight = d * roofPitch;
+
+            // A MÁGICA DA TENDA: Em vez de 1 pico central, criamos 2 pontos formando uma linha (cumeeira)
+            let r1, r2;
+            if (w >= h) {
+                // Tenda longa na horizontal
+                r1 = gridToScreen(bounds.minR + d, bounds.minC + d);
+                r2 = gridToScreen(bounds.minR + d, bounds.maxC + 1 - d);
+            } else {
+                // Tenda longa na vertical
+                r1 = gridToScreen(bounds.minR + d, bounds.minC + d);
+                r2 = gridToScreen(bounds.maxR + 1 - d, bounds.minC + d);
+            }
+
+            r1.y -= (blockHeight + roofHeight);
+            r2.y -= (blockHeight + roofHeight);
 
             ctx.save();
             
-            // Recorte Base Ortogonal
+            // GUILHOTINA SIMPLES E ORTOGONAL (Limita o telhado perfeitamente ao seu tile 64x32)
             ctx.beginPath();
             ctx.moveTo(pSul.x, pSul.y - blockHeight); 
             ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
@@ -428,11 +443,12 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.closePath();
             ctx.clip(); 
 
-            // Os 4 grandes painéis
-            const drawTri = (p1, p2, p3, overlay) => {
+            // Função nova para pintar polígonos de 3 ou 4 lados
+            const drawPoly = (pts, overlay) => {
                 ctx.fillStyle = roofColor;
                 ctx.beginPath(); 
-                ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); 
+                ctx.moveTo(pts[0].x, pts[0].y); 
+                for(let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
                 ctx.closePath(); 
                 ctx.fill();
                 
@@ -444,10 +460,18 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.stroke();
             };
 
-            drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); 
-            drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); 
-            drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); 
-            drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); 
+            // Desenha as águas do telhado se adaptando ao formato do prédio
+            if (w >= h) {
+                drawPoly([c_pN, c_pW, r1], 'rgba(0,0,0,0.3)');             // Face NW (Triângulo)
+                drawPoly([c_pN, c_pE, r2, r1], 'rgba(0,0,0,0.1)');         // Face NE (Trapezóide)
+                drawPoly([c_pE, c_pS, r2], 'rgba(0,0,0,0.4)');             // Face SE (Triângulo)
+                drawPoly([c_pW, c_pS, r2, r1], 'rgba(255,255,255,0.15)');  // Face SW (Trapezóide)
+            } else {
+                drawPoly([c_pN, c_pW, r2, r1], 'rgba(0,0,0,0.3)');         // Face NW (Trapezóide)
+                drawPoly([c_pN, c_pE, r1], 'rgba(0,0,0,0.1)');             // Face NE (Triângulo)
+                drawPoly([c_pE, c_pS, r2, r1], 'rgba(0,0,0,0.4)');         // Face SE (Trapezóide)
+                drawPoly([c_pW, c_pS, r2], 'rgba(255,255,255,0.15)');      // Face SW (Triângulo)
+            }
 
             ctx.restore(); 
         }
