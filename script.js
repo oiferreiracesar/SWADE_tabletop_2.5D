@@ -688,6 +688,50 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
 
             ctx.save();
+
+            // A NOVA GUILHOTINA DIAGONAL: Corta o telhado no formato exato da parede!
+        let ft = targetMap[row][col].floor;
+        ctx.beginPath();
+        if (ft === 2) {
+            ctx.moveTo(pOeste.x, pOeste.y - blockHeight);
+            ctx.lineTo(pNorte.x, pNorte.y - blockHeight);
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
+            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
+            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
+        } else if (ft === 3) {
+            ctx.moveTo(pOeste.x, pOeste.y - blockHeight);
+            ctx.lineTo(pSul.x, pSul.y - blockHeight);
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
+            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
+            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
+        } else if (ft === 4) {
+            ctx.moveTo(pNorte.x, pNorte.y - blockHeight);
+            ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
+            ctx.lineTo(pSul.x, pSul.y - blockHeight);
+            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
+            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
+            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
+        } else if (ft === 5) {
+            ctx.moveTo(pNorte.x, pNorte.y - blockHeight);
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
+            ctx.lineTo(pSul.x, pSul.y - blockHeight);
+            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
+            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
+        } else {
+            // Quadrado padrão
+            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
+            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
+            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
+            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
+            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
+        }
+        ctx.closePath();
+        ctx.clip();
+        
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 // Se todo o triângulo estiver grudado no chão do lado de fora, a gente ignora.
                 if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1 && p3_3d.z <= 0.1) return;
