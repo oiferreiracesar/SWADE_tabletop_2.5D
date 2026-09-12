@@ -35,9 +35,6 @@ let currentFloor = 0;
 let mapData = {};
 let map; 
 
-let enclosedCache = {};
-let cellToRoofBoundsCache = {};
-
 function createEmptyMap() {
     const newMap = [];
     for (let i = 0; i < 10; i++) {
@@ -92,125 +89,43 @@ function drawFlatWall(p1, p2, height, color) {
     ctx.stroke();
 }
 
-function isEnclosed(fIndex, startRow, startCol) {
-    const fMap = mapData[fIndex];
-    if (!fMap) return false;
-
-    const queue = [{r: startRow, c: startCol}];
-    const visited = new Set();
-    visited.add(`${startRow},${startCol}`);
-
-    while (queue.length > 0) {
-        const {r, c} = queue.shift();
-
-        if (fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0) {
-            continue;
-        }
-
-        if (fMap[r][c].wallL === 0) {
-            if (c === 0) return false; 
-            if (!visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
-        }
-        if (c === 9) return false; 
-        else if (fMap[r][c+1].wallL === 0) {
-            if (!visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
-        }
-        if (fMap[r][c].wallR === 0) {
-            if (r === 0) return false;
-            if (!visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
-        }
-        if (r === 9) return false;
-        else if (fMap[r+1][c].wallR === 0) {
-            if (!visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
-        }
-    }
-    return true; 
-}
-
-function precalculateRooms() {
-    enclosedCache = {};
-    cellToRoofBoundsCache = {};
-    const floors = Object.keys(mapData).map(Number);
-    
-    for (const f of floors) {
-        for (let r = 0; r < 10; r++) {
-            for (let c = 0; c < 10; c++) {
-                enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
-            }
-        }
-        
-        const visited = new Set();
-        for (let r = 0; r < 10; r++) {
-            for (let c = 0; c < 10; c++) {
-                if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
-                    let minR = r, maxR = r, minC = c, maxC = c;
-                    const queue = [{r, c}];
-                    visited.add(`${r},${c}`);
-                    
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        minR = Math.min(minR, curr.r);
-                        maxR = Math.max(maxR, curr.r);
-                        minC = Math.min(minC, curr.c);
-                        maxC = Math.max(maxC, curr.c);
-                        
-                        const neighbors = [
-                            {r: curr.r-1, c: curr.c}, {r: curr.r+1, c: curr.c},
-                            {r: curr.r, c: curr.c-1}, {r: curr.r, c: curr.c+1}
-                        ];
-                        for (let n of neighbors) {
-                            if (n.r >= 0 && n.r < 10 && n.c >= 0 && n.c < 10) {
-                                if (!visited.has(`${n.r},${n.c}`) && enclosedCache[`${f},${n.r},${n.c}`]) {
-                                    visited.add(`${n.r},${n.c}`);
-                                    queue.push(n);
-                                }
-                            }
-                        }
-                    }
-                    
-                    const bounds = {minR, maxR, minC, maxC};
-                    for (let rr = minR; rr <= maxR; rr++) {
-                        for (let cc = minC; cc <= maxC; cc++) {
-                            cellToRoofBoundsCache[`${f},${rr},${cc}`] = bounds;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// O NOVO CÁLCULO EUCLIDIANO 3D: Detecta diagonais e suaviza octógonos
+// O CÁLCULO MESTRE OCTOGONAL (Campo de Distância Isométrico)
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
-    
+
+    // Distância Octogonal (Arredonda os cantos gerando pavilhões em vez de blocos retos)
+    const distPoint = (px, py) => Math.max(Math.abs(x - px), Math.abs(y - py), (Math.abs(x - px) + Math.abs(y - py)) / Math.SQRT2);
+
+    // Mede a distância até uma linha diagonal (paredes de triângulos/octógonos)
+    const distSegment = (x1, y1, x2, y2) => {
+        let l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+        if (l2 === 0) return distPoint(x1, y1);
+        let t = Math.max(0, Math.min(1, ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / l2));
+        return distPoint(x1 + t * (x2 - x1), y1 + t * (y2 - y1));
+    };
+
+    const distBox = (minR, maxR, minC, maxC) => {
+        let dx = Math.max(0, minR - x, x - maxR);
+        let dy = Math.max(0, minC - y, y - maxC);
+        return Math.max(dx, dy, (dx + dy) / Math.SQRT2);
+    };
+
     for (let r = -2; r <= 11; r++) {
         for (let c = -2; c <= 11; c++) {
-            let isEnclosedCell = false;
             let ft = 0;
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
-                if (isEnclosedCell) ft = mapData[fIndex][r][c].floor;
-            }
+            if (r >= 0 && r < 10 && c >= 0 && c < 10) ft = mapData[fIndex][r][c].floor;
 
-            if (!isEnclosedCell) {
-                // Cálculo de Distância Euclidiana para um quadrado vazio
-                let dx = Math.max(0, r - x, x - (r + 1));
-                let dy = Math.max(0, c - y, y - (c + 1));
-                let d = Math.sqrt(dx * dx + dy * dy);
+            if (ft === 0) {
+                // É quintal/ar livre, puxa o telhado pra baixo
+                let d = distBox(r, r + 1, c, c + 1);
                 if (d < minDist) minDist = d;
             } else if (ft >= 2 && ft <= 5) {
-                // Se a célula for uma sala diagonal, o telhado para na linha da parede!
-                let x1, y1, x2, y2;
-                if (ft === 2 || ft === 3) { x1 = r; y1 = c + 1; x2 = r + 1; y2 = c; } // Diagonal Noroeste / Sudeste
-                else { x1 = r; y1 = c; x2 = r + 1; y2 = c + 1; } // Diagonal Sudoeste / Nordeste
-                
-                // Distância matemática do ponto (x,y) até a linha diagonal da célula
-                let l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
-                let t = Math.max(0, Math.min(1, ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / l2));
-                let pxProj = x1 + t * (x2 - x1);
-                let pyProj = y1 + t * (y2 - y1);
-                let d = Math.sqrt((x - pxProj) * (x - pxProj) + (y - pyProj) * (y - pyProj));
+                // É diagonal! A distância bate milimetricamente na linha da parede cortada.
+                let d = Infinity;
+                if (ft === 2) { if ((x - r) + (y - c) >= 1) d = 0; else d = distSegment(r+1, c, r, c+1); } // NW
+                if (ft === 3) { if ((x - r) + (y - c) <= 1) d = 0; else d = distSegment(r+1, c, r, c+1); } // SE
+                if (ft === 4) { if ((y - c) - (x - r) >= 0) d = 0; else d = distSegment(r, c, r+1, c+1); } // SW
+                if (ft === 5) { if ((y - c) - (x - r) <= 0) d = 0; else d = distSegment(r, c, r+1, c+1); } // NE
                 if (d < minDist) minDist = d;
             }
         }
@@ -218,12 +133,11 @@ function getRoofZ(fIndex, x, y, pitch) {
     return minDist * pitch;
 }
 
-// NOVO SHADER DE LUZ (Dot Product / Iluminação Direcional)
+// O NOVO SHADER SOLAR: Normal Mapping matemático para iluminar suavemente as 8 faces do octógono
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
     if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
 
-    // Calcula a inclinação (A normal do polígono)
     let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
     let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
 
@@ -231,26 +145,22 @@ function getTriangleShade(p1, p2, p3) {
     let ny = -b;
     let eps = 0.05;
 
-    // Se o triângulo for plano (Cumeeira de telhados estilo Mansard)
     if (Math.abs(nx) < eps && Math.abs(ny) < eps) return 'rgba(255,255,255,0.05)'; 
 
-    // Normaliza o vetor 3D
     let len = Math.sqrt(nx*nx + ny*ny + 1);
     let dX = nx / len;
     let dY = ny / len;
 
-    // A Posição do Sol (Sudoeste Alto) - Brilha de frente para a câmera
-    let lightX = 0.7; 
+    let lightX = 0.7; // O Sol bate forte a Sudoeste
     let lightY = -0.3; 
 
     let dot = (dX * lightX) + (dY * lightY);
 
-    // Mapeamento dinâmico: Gera os 8 tons exatos para que os octógonos fiquem lisos
-    if (dot > 0.3) return 'rgba(255, 255, 255, 0.15)'; // Encosta Sudoeste (Sol direto)
-    if (dot > 0.0) return 'rgba(255, 255, 255, 0.05)'; // Faces laterais claras
-    if (dot > -0.3) return 'rgba(0, 0, 0, 0.15)';      // Sombras Intermediárias
-    if (dot > -0.6) return 'rgba(0, 0, 0, 0.3)';       // Encosta Leste / Nordeste
-    return 'rgba(0, 0, 0, 0.45)';                      // Encosta Sudeste (Sombra Forte)
+    if (dot > 0.3) return 'rgba(255, 255, 255, 0.15)'; // Iluminado
+    if (dot > 0.0) return 'rgba(255, 255, 255, 0.05)'; // Meia luz clara
+    if (dot > -0.3) return 'rgba(0, 0, 0, 0.15)';      // Meia luz escura
+    if (dot > -0.6) return 'rgba(0, 0, 0, 0.3)';       // Sombra forte
+    return 'rgba(0, 0, 0, 0.45)';                      // Muito Escuro
 }
 
 function isFloorSupported(r, c) {
@@ -261,7 +171,7 @@ function isFloorSupported(r, c) {
     if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
     if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
     if (r < 9 && mapData[currentFloor-1][r+1][c].wallR > 0) return true;
-    if (isEnclosed(currentFloor - 1, r, c)) return true;
+    if (lower.floor > 0) return true;
     return false;
 }
 
@@ -276,9 +186,7 @@ function isWallSupported(r, c, side) {
     if (lower.column === 1) return true;
     if (side === 'L' && c > 0 && mapData[currentFloor - 1][r][c - 1].column === 1) return true;
     if (side === 'R' && r > 0 && mapData[currentFloor - 1][r - 1][c].column === 1) return true;
-    if (isEnclosed(currentFloor - 1, r, c)) return true;
-    if (side === 'L' && c > 0 && isEnclosed(currentFloor - 1, r, c - 1)) return true;
-    if (side === 'R' && r > 0 && isEnclosed(currentFloor - 1, r - 1, c)) return true;
+    if (lower.floor > 0) return true;
     return false;
 }
 
@@ -286,7 +194,6 @@ function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
     if (upper[r][c].floor > 0) return true;
-    if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true;
     return false;
 }
 
@@ -546,7 +453,7 @@ function updatePreview() {
     }
 }
 
-// O RENDERIZADOR ISOMÉTRICO (Fases desativadas! O Z-Sorting Clássico voltou)
+// RENDERIZAÇÃO LIMPA E SEM MASSA DE RECORTES (Fases de RenderPass de volta para manter o Z-Sorting Intacto)
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
@@ -560,8 +467,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     const pSul   = gridToScreen(row + 1, col + 1);
     const pOeste = gridToScreen(row + 1, col);
 
+    let ft = targetMap[row][col].floor;
+
+    // FASE 0: Parede e Chão
     if (renderPass === 0) {
-        const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+        const hasContent = ft > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
         
         let shouldDrawGrid = false;
         if (fIndex === currentFloor) {
@@ -574,24 +484,22 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
 
         let isDirt = false;
-        if (fIndex <= 0) {
-            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
-                isDirt = true;
-            }
+        if (fIndex <= 0 && ft === 0) {
+            isDirt = true;
         }
 
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
             ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath(); ctx.fill();
-        } else if (targetMap[row][col].floor > 0) {
+        } else if (ft > 0) {
             ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
             ctx.beginPath();
-            if (targetMap[row][col].floor === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-            else if (targetMap[row][col].floor === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
-            else if (targetMap[row][col].floor === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
-            else if (targetMap[row][col].floor === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
-            else if (targetMap[row][col].floor === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
+            if (ft === 1) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+            else if (ft === 2) { ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pOeste.x, pOeste.y); } 
+            else if (ft === 3) { ctx.moveTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y); ctx.lineTo(pLeste.x, pLeste.y); } 
+            else if (ft === 4) { ctx.moveTo(pOeste.x, pOeste.y); ctx.lineTo(pNorte.x, pNorte.y); ctx.lineTo(pSul.x, pSul.y); } 
+            else if (ft === 5) { ctx.moveTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pNorte.x, pNorte.y); }
             ctx.closePath(); ctx.fill(); 
         }
         
@@ -639,13 +547,13 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     } 
 
-    // FASE 1: O TELHADO 3D (Corte e Sombras Contínuas)
+    // FASE 1: O TELHADO (Gerado Proceduralmente sobre os pisos com distância Real)
     else if (renderPass === 1) {
         let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && cellToRoofBoundsCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+        // Se houver qualquer piso desenhado e não tiver nada em cima, o Telhado sobe!
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && ft > 0 && !hasStructureAbove(fIndex, row, col)) {
             
-            // Distância matemática Euclidiana de cada vértice para a borda!
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
             let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
@@ -678,57 +586,93 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             ctx.save();
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
-                // Se todo o triângulo estiver grudado no chão do lado de fora, a gente ignora.
+                // Se as três pontas estiverem encostando no "chão falso" (fora do telhado), descarta
                 if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1 && p3_3d.z <= 0.1) return;
 
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
                 if (overlay === 'rgba(0,0,0,0)') return;
 
                 ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
+                
+                // Pinta o telhado sem nenhuma borda preta (Wireframe nunca mais!)
                 ctx.fillStyle = roofColor; ctx.fill();
                 ctx.fillStyle = overlay; ctx.fill();
+                
+                // As bordas invisíveis da mesma cor da sombra ocultam qualquer serrilhado de pintura
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 0.5; ctx.stroke();
+                ctx.strokeStyle = overlay; ctx.stroke();
             };
 
-            // Desenha os 8 fragmentos da malha em cima da célula
-            drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
-            drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
-            drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
-            drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
-            drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
-            drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
-            drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
-            drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+            // Para pisos quadrados normais (ft===1), desenha as 8 faces completas da malha
+            if (ft === 1) {
+                drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
+                drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
+                drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
+                drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
+                drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
+                drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
+                drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
+                drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+            } 
+            // Para as salas diagonais, ele só processa o lado que pertence ao triângulo do chão!
+            else if (ft === 2) { // NW
+                drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
+                drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+                drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
+                drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d); // Até o leste
+                drawMicroTri(t_pE, t_pW, t_pC, pE_3d, pW_3d, pC_3d); // Fechamento central
+            }
+            else if (ft === 3) { // SE
+                drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
+                drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
+                drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
+                drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d); 
+                drawMicroTri(t_pW, t_pE, t_pC, pW_3d, pE_3d, pC_3d); 
+            }
+            else if (ft === 4) { // SW
+                drawMicroTri(t_pN, t_pNW, t_pC, pN_3d, pNW_3d, pC_3d);
+                drawMicroTri(t_pNW, t_pW, t_pC, pNW_3d, pW_3d, pC_3d);
+                drawMicroTri(t_pW, t_pSW, t_pC, pW_3d, pSW_3d, pC_3d);
+                drawMicroTri(t_pSW, t_pS, t_pC, pSW_3d, pS_3d, pC_3d);
+                drawMicroTri(t_pS, t_pN, t_pC, pS_3d, pN_3d, pC_3d);
+            }
+            else if (ft === 5) { // NE
+                drawMicroTri(t_pS, t_pSE, t_pC, pS_3d, pSE_3d, pC_3d);
+                drawMicroTri(t_pSE, t_pE, t_pC, pSE_3d, pE_3d, pC_3d);
+                drawMicroTri(t_pE, t_pNE, t_pC, pE_3d, pNE_3d, pC_3d);
+                drawMicroTri(t_pNE, t_pN, t_pC, pNE_3d, pN_3d, pC_3d);
+                drawMicroTri(t_pN, t_pS, t_pC, pN_3d, pS_3d, pC_3d);
+            }
             
             ctx.restore();
         }
-    }
 
-    if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
-        const supp = isFloorSupported(row, col);
-        let colH = applyCutaway ? cutawayHeight : blockHeight;
-        const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
-        
-        let ghostColor = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.4)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)'); 
-        ctx.fillStyle = ghostColor;
-        ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
-    }
+        if (showActiveTools && currentBrush === 6 && row === hoverRow && col === hoverCol && !isDragging) {
+            const supp = isFloorSupported(row, col);
+            let colH = applyCutaway ? cutawayHeight : blockHeight;
+            const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
+            
+            let ghostColor = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.4)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)'); 
+            ctx.fillStyle = ghostColor;
+            ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill();
+        }
 
-    if (showActiveTools && renderPass === 1) {
-        const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
-        if (ghosts.length > 0) {
-            ctx.globalAlpha = 0.7;
-            const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
-            ghosts.forEach(p => {
-                let hGhost = applyCutaway ? cutawayHeight : blockHeight;
-                if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
-                else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
-                else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
-                else if (p.side === 'NS') drawFlatWall(pNorte, pSul, hGhost, ghostColor);
-            });
-            ctx.globalAlpha = 1.0;
+        if (showActiveTools) {
+            const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
+            if (ghosts.length > 0) {
+                ctx.globalAlpha = 0.7;
+                const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+                ghosts.forEach(p => {
+                    let hGhost = applyCutaway ? cutawayHeight : blockHeight;
+                    if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
+                    else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
+                    else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
+                    else if (p.side === 'NS') drawFlatWall(pNorte, pSul, hGhost, ghostColor);
+                });
+                ctx.globalAlpha = 1.0;
+            }
         }
     }
 
@@ -736,7 +680,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 }
 
 function drawIsometricGrid() {
-    precalculateRooms(); 
     
     ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -747,9 +690,6 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // A MÁGICA DA OCLUSÃO ISOMÉTRICA!
-    // As células são desenhadas DE TRÁS PARA FRENTE de forma integral. A parede do 2º andar desenha 
-    // POR CIMA do teto do 1º andar.
     let renderQueue = [];
     for (const f of floors) {
         if (currentFloor < 0 && f >= 0) continue;
