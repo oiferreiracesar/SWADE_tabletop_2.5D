@@ -180,47 +180,53 @@ function precalculateRooms() {
     }
 }
 
-// O NOVO CÁLCULO EUCLIDIANO 3D: Detecta diagonais e suaviza octógonos
+// O NOVO CÁLCULO EUCLIDIANO 3D: Detecta cantos e suaviza octógonos em pavilhões
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
     
     for (let r = -2; r <= 11; r++) {
         for (let c = -2; c <= 11; c++) {
-            let isEnclosedCell = false;
+            let isEnclosed = false;
             let ft = 0;
-            
             if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
-                if (isEnclosedCell) ft = mapData[fIndex][r][c].floor;
+                isEnclosed = enclosedCache[`${fIndex},${r},${c}`];
+                if (isEnclosed) ft = mapData[fIndex][r][c].floor;
             }
 
-            if (!isEnclosedCell) {
-                // Distância Euclidiana Real para a borda de um quadrado vazio
+            if (!isEnclosed) {
+                // Distância Euclidiana Padrão para blocos de ar
                 let dx = Math.max(0, r - x, x - (r + 1));
                 let dy = Math.max(0, c - y, y - (c + 1));
                 let d = Math.sqrt(dx * dx + dy * dy);
+
+                // A MÁGICA DOS OCTÓGONOS: Transforma os "degraus" vazios em linhas diagonais!
+                // Verifica se este bloco vazio tem paredes grudadas formando uma "quina interna"
+                let encN = (r - 1 >= 0 && enclosedCache[`${fIndex},${r-1},${c}`]);
+                let encS = (r + 1 < 10 && enclosedCache[`${fIndex},${r+1},${c}`]);
+                let encW = (c - 1 >= 0 && enclosedCache[`${fIndex},${r},${c-1}`]);
+                let encE = (c + 1 < 10 && enclosedCache[`${fIndex},${r},${c+1}`]);
+
+                let lx = x - r;
+                let ly = y - c;
+
+                // Corta a distância usando a fórmula da reta (Math.SQRT2)
+                if (encE && encS) d = Math.min(d, Math.abs(lx + ly - 1) / Math.SQRT2); // Quina Noroeste
+                if (encW && encN) d = Math.min(d, Math.abs(lx + ly - 1) / Math.SQRT2); // Quina Sudeste
+                if (encW && encS) d = Math.min(d, Math.abs(lx - ly) / Math.SQRT2);     // Quina Nordeste
+                if (encE && encN) d = Math.min(d, Math.abs(lx - ly) / Math.SQRT2);     // Quina Sudoeste
+
                 if (d < minDist) minDist = d;
             } 
             else if (ft >= 2 && ft <= 5) {
-                // A MÁGICA DOS OCTÓGONOS: Distância matemática do ponto até a linha de corte da diagonal
-                let d = Infinity;
-                let lx = x - r; // Coordenada X local dentro da célula
-                let ly = y - c; // Coordenada Y local dentro da célula
-                
-                if (ft === 2 || ft === 3) {
-                    // Células com diagonal Noroeste / Sudeste (Equação da reta: X + Y - 1 = 0)
-                    d = Math.abs(lx + ly - 1) / Math.SQRT2;
-                } 
-                else if (ft === 4 || ft === 5) {
-                    // Células com diagonal Sudoeste / Nordeste (Equação da reta: X - Y = 0)
-                    d = Math.abs(lx - ly) / Math.SQRT2;
-                }
-                
+                // Suporte extra: Se o jogador pintar um piso diagonal manualmente
+                let lx = x - r;
+                let ly = y - c;
+                let d = (ft === 2 || ft === 3) ? Math.abs(lx + ly - 1) / Math.SQRT2 : Math.abs(lx - ly) / Math.SQRT2;
                 if (d < minDist) minDist = d;
             }
         }
     }
-    return minDist * pitch;
+    return Math.max(0, minDist) * pitch;
 }
 
 // NOVO SHADER DE LUZ (Dot Product / Iluminação Direcional)
@@ -648,7 +654,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     else if (renderPass === 1) {
         let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && cellToRoofBoundsCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
             
             // Distância matemática Euclidiana de cada vértice para a borda!
             let zN = getRoofZ(fIndex, row, col, roofPitch);
