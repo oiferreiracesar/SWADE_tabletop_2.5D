@@ -8,7 +8,7 @@
         body {
             margin: 0;
             padding: 0;
-            background-color: #0f172a; /* Fundo geral */
+            background-color: #0f172a;
             color: #e2e8f0;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
@@ -16,9 +16,10 @@
             overflow: hidden;
         }
 
-        /* Painel Lateral de UI */
+        /* PAINEL LATERAL BLINDADO */
         #ui-panel {
             width: 260px;
+            min-width: 260px; /* Garante que o canvas nunca esmague o menu */
             background-color: #1e293b;
             box-shadow: 2px 0 10px rgba(0,0,0,0.5);
             display: flex;
@@ -65,7 +66,6 @@
             font-weight: bold;
         }
 
-        /* Controles de Andar */
         .floor-controls {
             display: flex;
             justify-content: space-between;
@@ -75,10 +75,10 @@
             border-radius: 6px;
             margin-bottom: 25px;
         }
+        
         .floor-controls button { padding: 5px 12px; text-align: center; }
         #floorLabel { font-size: 0.85rem; font-weight: bold; text-align: center; }
 
-        /* Controles Deslizantes e Menus */
         .slider-group {
             display: flex;
             flex-direction: column;
@@ -96,7 +96,6 @@
             width: 100%;
         }
 
-        /* Seletores de Cor */
         .color-picker {
             display: flex;
             justify-content: space-between;
@@ -104,6 +103,7 @@
             font-size: 0.85rem;
             margin-bottom: 8px;
         }
+        
         .color-picker input[type="color"] {
             cursor: pointer;
             border: none;
@@ -114,9 +114,21 @@
             background: none;
         }
 
-        /* Canvas de Renderização */
-        #gameCanvas {
+        /* O ESCUDO DO CANVAS: Mantém o ambiente 3D no lugar dele */
+        #canvas-container {
             flex-grow: 1;
+            position: relative;
+            width: calc(100vw - 260px);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             cursor: crosshair;
             display: block;
         }
@@ -126,14 +138,12 @@
 
     <div id="ui-panel">
         
-        <!-- NAVEGAÇÃO DE ANDARES -->
         <div class="floor-controls">
             <button id="btnFloorDown" title="Descer Andar">▼</button>
             <span id="floorLabel">Andar Atual: Térreo (0)</span>
             <button id="btnFloorUp" title="Subir Andar">▲</button>
         </div>
 
-        <!-- CONSTRUÇÃO -->
         <h2>Ferramentas</h2>
         <div class="tool-group">
             <button id="btnPiso" class="active">Piso (1)</button>
@@ -142,7 +152,6 @@
             <button id="btnColuna">Coluna de Apoio (6)</button>
         </div>
 
-        <!-- MODIFICADORES -->
         <h2>Ações</h2>
         <div class="tool-group">
             <button id="btnBorracha">Apagar (Segurar Ctrl)</button>
@@ -150,7 +159,6 @@
             <button id="btnUndo">Desfazer (Ctrl+Z)</button>
         </div>
 
-        <!-- CONFIGURAÇÕES DE GEOMETRIA -->
         <h2>Geometria</h2>
         <div class="slider-group">
             <label for="sliderAltura">Altura das Paredes: <strong id="valorAltura">48</strong></label>
@@ -165,7 +173,6 @@
             </select>
         </div>
 
-        <!-- MATERIAIS / CORES -->
         <h2>Materiais</h2>
         <div class="color-picker">
             <span>Grama / Chão:</span>
@@ -186,10 +193,11 @@
 
     </div>
 
-    <!-- O motor visual -->
-    <canvas id="gameCanvas"></canvas>
+    <!-- Container protetor da engine -->
+    <div id="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
 
-    <!-- Conexão com a nossa Engine JS -->
     <script src="script.js"></script>
 </body>
 </html>
