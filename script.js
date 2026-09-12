@@ -5,7 +5,6 @@ const container = document.getElementById('canvas-container');
 const tileWidth = 64;
 const tileHeight = 32;
 
-// O Ponto Zero dinâmico (necessário para a tela responsiva)
 let originX = 0; 
 let originY = 100;
 
@@ -37,7 +36,6 @@ let mapData = {};
 let map; 
 
 let enclosedCache = {};
-let roomBoundsCache = {};
 
 function createEmptyMap() {
     const newMap = [];
@@ -130,54 +128,67 @@ function isEnclosed(fIndex, startRow, startCol) {
 
 function precalculateRooms() {
     enclosedCache = {};
-    roomBoundsCache = {};
     const floors = Object.keys(mapData).map(Number);
-    
     for (const f of floors) {
         for (let r = 0; r < 10; r++) {
             for (let c = 0; c < 10; c++) {
                 enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
             }
         }
-        
-        const visited = new Set();
-        for (let r = 0; r < 10; r++) {
-            for (let c = 0; c < 10; c++) {
-                if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
-                    let minR = r, maxR = r, minC = c, maxC = c;
-                    const queue = [{r, c}];
-                    const roomCells = [];
-                    visited.add(`${r},${c}`);
-                    
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        roomCells.push(curr);
-                        minR = Math.min(minR, curr.r);
-                        maxR = Math.max(maxR, curr.r);
-                        minC = Math.min(minC, curr.c);
-                        maxC = Math.max(maxC, curr.c);
-                        
-                        const neighbors = [
-                            {r: curr.r-1, c: curr.c}, {r: curr.r+1, c: curr.c},
-                            {r: curr.r, c: curr.c-1}, {r: curr.r, c: curr.c+1}
-                        ];
-                        for (let n of neighbors) {
-                            if (n.r >= 0 && n.r < 10 && n.c >= 0 && n.c < 10) {
-                                if (!visited.has(`${n.r},${n.c}`) && enclosedCache[`${f},${n.r},${n.c}`]) {
-                                    visited.add(`${n.r},${n.c}`);
-                                    queue.push(n);
-                                }
-                            }
-                        }
-                    }
-                    const bounds = {minR, maxR, minC, maxC};
-                    for (let cell of roomCells) {
-                        roomBoundsCache[`${f},${cell.r},${cell.c}`] = bounds;
-                    }
-                }
+    }
+}
+
+// O CÁLCULO MESTRE 3D RESGATADO: Campo de Distância de Chebyshev
+// Faz os telhados de "L", "C" e "U" convergirem e se moldarem sem Bounding Box!
+function getRoofZ(fIndex, x, y, pitch) {
+    let minDist = Infinity;
+    for (let r = -2; r <= 11; r++) {
+        for (let c = -2; c <= 11; c++) {
+            let isEnclosedCell = false;
+            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`] || mapData[fIndex][r][c].floor > 0;
+            }
+            if (!isEnclosedCell) {
+                let dx = 0;
+                if (x < r) dx = r - x;
+                else if (x > r + 1) dx = x - (r + 1);
+                
+                let dy = 0;
+                if (y < c) dy = c - y;
+                else if (y > c + 1) dy = y - (c + 1);
+                
+                let dist = Math.max(dx, dy);
+                if (dist < minDist) minDist = dist;
             }
         }
     }
+    return minDist * pitch;
+}
+
+// O SHADER MATEMÁTICO: Oculta as divisões do grid calculando a luz do Sol
+function getTriangleShade(p1, p2, p3) {
+    let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
+    if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
+
+    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
+    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
+
+    let eps = 0.01;
+    let nx = -a; 
+    let ny = -b;
+
+    if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; // Face Sol
+    if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; 
+    if (Math.abs(nx) <= eps && ny > eps) return 'rgba(0,0,0,0.4)'; // Face Sombra Forte
+    if (Math.abs(nx) <= eps && ny < -eps) return 'rgba(0,0,0,0.25)'; 
+
+    // Quinas (Águas-furtadas)
+    if (nx > eps && ny > eps) return 'rgba(0,0,0,0.15)';
+    if (nx > eps && ny < -eps) return 'rgba(255,255,255,0.05)';
+    if (nx < -eps && ny > eps) return 'rgba(0,0,0,0.3)';
+    if (nx < -eps && ny < -eps) return 'rgba(0,0,0,0.2)';
+
+    return 'rgba(255,255,255,0.05)'; // Cumeeira Plana
 }
 
 function isFloorSupported(r, c) {
@@ -343,8 +354,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.closePath(); ctx.fill();
         } else if (targetMap[row][col].floor > 0) {
             ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
-            ctx.beginPath();
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath(); ctx.fill(); 
         }
         
@@ -355,8 +365,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
         if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
             const supp = isFloorSupported(row, col);
-            ctx.beginPath();
-            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath();
             ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
             ctx.fill();
@@ -387,52 +396,50 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     } 
 
-    // FASE 1: O TELHADO FORMATO TENDA (Telhado de 4 Águas com Cumeeira)
+    // FASE 1: O RETORNO DA MEDIAL AXIS (A fórmula mágica para o "L", "U" e "C")
     else if (renderPass === 1) {
         let hideLowerRoof = false;
         if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
             hideLowerRoof = true;
         }
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
-            const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && (enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0) && !hasStructureAbove(fIndex, row, col)) {
             
-            let c_pN = gridToScreen(bounds.minR, bounds.minC);
-            let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1);
-            let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1);
-            let c_pW = gridToScreen(bounds.maxR + 1, bounds.minC);
-            
-            c_pN.y -= blockHeight;
-            c_pE.y -= blockHeight;
-            c_pS.y -= blockHeight;
-            c_pW.y -= blockHeight;
+            // Mede a distância das pontas e do centro (Chebyshev Math!)
+            let zN = getRoofZ(fIndex, row, col, roofPitch);
+            let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
+            let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
+            let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
+            let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
+            let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
+            let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
+            let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
+            let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
 
-            // Largura (w) e Comprimento (h) da casa
-            let w = bounds.maxC - bounds.minC + 1;
-            let h = bounds.maxR - bounds.minR + 1;
-            
-            // A profundidade define a distância da calha até a cumeeira (linha do topo)
-            let d = Math.min(w, h) / 2;
-            let roofHeight = d * roofPitch;
+            // Transfere pro 2D 
+            let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
+            let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
+            let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
+            let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
+            let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
+            let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
+            let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
+            let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
+            let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
 
-            // A MÁGICA DA TENDA: Em vez de 1 pico central, criamos 2 pontos formando uma linha (cumeeira)
-            let r1, r2;
-            if (w >= h) {
-                // Tenda longa na horizontal
-                r1 = gridToScreen(bounds.minR + d, bounds.minC + d);
-                r2 = gridToScreen(bounds.minR + d, bounds.maxC + 1 - d);
-            } else {
-                // Tenda longa na vertical
-                r1 = gridToScreen(bounds.minR + d, bounds.minC + d);
-                r2 = gridToScreen(bounds.maxR + 1 - d, bounds.minC + d);
-            }
-
-            r1.y -= (blockHeight + roofHeight);
-            r2.y -= (blockHeight + roofHeight);
+            let pN_3d = {x: row, y: col, z: zN};
+            let pNE_3d = {x: row, y: col + 0.5, z: zNE};
+            let pE_3d = {x: row, y: col + 1, z: zE};
+            let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
+            let pS_3d = {x: row + 1, y: col + 1, z: zS};
+            let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
+            let pW_3d = {x: row + 1, y: col, z: zW};
+            let pNW_3d = {x: row + 0.5, y: col, z: zNW};
+            let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
 
             ctx.save();
             
-            // GUILHOTINA SIMPLES E ORTOGONAL (Limita o telhado perfeitamente ao seu tile 64x32)
+            // Oculta eventuais derramamentos sutis da calha
             ctx.beginPath();
             ctx.moveTo(pSul.x, pSul.y - blockHeight); 
             ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
@@ -441,39 +448,31 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
             ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
             ctx.closePath();
-            ctx.clip(); 
+            ctx.clip();
 
-            // Função nova para pintar polígonos de 3 ou 4 lados
-            const drawPoly = (pts, overlay) => {
-                ctx.fillStyle = roofColor;
-                ctx.beginPath(); 
-                ctx.moveTo(pts[0].x, pts[0].y); 
-                for(let i=1; i<pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-                ctx.closePath(); 
-                ctx.fill();
+            const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
+                let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
+                if (overlay === 'rgba(0,0,0,0)') return;
+
+                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
+                ctx.fillStyle = roofColor; ctx.fill();
+                ctx.fillStyle = overlay; ctx.fill();
                 
-                ctx.fillStyle = overlay; 
-                ctx.fill();
-                
-                ctx.strokeStyle = 'rgba(0,0,0,0.15)'; 
-                ctx.lineWidth = 1; 
-                ctx.stroke();
+                // O REMÉDIO PARA A CAIXA DE OVO: O stroke sela as frestas com a cor exata do triângulo!
+                ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
+                ctx.strokeStyle = overlay; ctx.lineWidth = 1; ctx.stroke();
             };
 
-            // Desenha as águas do telhado se adaptando ao formato do prédio
-            if (w >= h) {
-                drawPoly([c_pN, c_pW, r1], 'rgba(0,0,0,0.3)');             // Face NW (Triângulo)
-                drawPoly([c_pN, c_pE, r2, r1], 'rgba(0,0,0,0.1)');         // Face NE (Trapezóide)
-                drawPoly([c_pE, c_pS, r2], 'rgba(0,0,0,0.4)');             // Face SE (Triângulo)
-                drawPoly([c_pW, c_pS, r2, r1], 'rgba(255,255,255,0.15)');  // Face SW (Trapezóide)
-            } else {
-                drawPoly([c_pN, c_pW, r2, r1], 'rgba(0,0,0,0.3)');         // Face NW (Trapezóide)
-                drawPoly([c_pN, c_pE, r1], 'rgba(0,0,0,0.1)');             // Face NE (Triângulo)
-                drawPoly([c_pE, c_pS, r2, r1], 'rgba(0,0,0,0.4)');         // Face SE (Trapezóide)
-                drawPoly([c_pW, c_pS, r2], 'rgba(255,255,255,0.15)');      // Face SW (Triângulo)
-            }
-
-            ctx.restore(); 
+            drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
+            drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
+            drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
+            drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
+            drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
+            drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
+            drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
+            drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+            
+            ctx.restore();
         }
     }
 
@@ -851,17 +850,14 @@ document.getElementById('btnUndo').addEventListener('click', () => {
     window.dispatchEvent(event);
 });
 
-// A REDIMENSÃO INTELIGENTE: Mantém o canvas perfeito dentro do espaço reservado
 function resizeCanvas() {
     if (!container) return;
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
-    originX = canvas.width / 2; // O centro da tela acompanha o navegador
+    originX = canvas.width / 2;
     drawIsometricGrid();
 }
 
 window.addEventListener('resize', resizeCanvas);
-
-// Chamadas iniciais para desenhar a primeira vez sem bugar
 updateUI();
 resizeCanvas();
