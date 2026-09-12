@@ -36,6 +36,7 @@ let mapData = {};
 let map; 
 
 let enclosedCache = {};
+let roofSegmentsCache = {}; // NOVO: Guarda o contorno exato do telhado
 
 function createEmptyMap() {
     const newMap = [];
@@ -126,8 +127,46 @@ function isEnclosed(fIndex, startRow, startCol) {
     return true; 
 }
 
+// 1. O MAPEADOR GEOMÉTRICO (Extrai as linhas de contorno reais da sua planta)
+function getCellRoofType(fIndex, r, c) {
+    if (r < 0 || r >= 10 || c < 0 || c >= 10) return 0;
+    let ft = mapData[fIndex][r][c].floor;
+    if (enclosedCache[`${fIndex},${r},${c}`] && ft === 0) return 1; 
+    return ft;
+}
+
+function buildRoofSegments(fIndex) {
+    let segments = [];
+    const solidTop = (ft) => ft === 1 || ft === 3 || ft === 4;
+    const solidBot = (ft) => ft === 1 || ft === 2 || ft === 5;
+    const solidLeft = (ft) => ft === 1 || ft === 3 || ft === 5;
+    const solidRight = (ft) => ft === 1 || ft === 2 || ft === 4;
+
+    for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 10; c++) {
+            let ft = getCellRoofType(fIndex, r, c);
+            if (ft === 0) continue;
+
+            // Borda Externa Norte
+            if (solidTop(ft) && !solidBot(getCellRoofType(fIndex, r - 1, c))) segments.push({x1: c, y1: r, x2: c + 1, y2: r});
+            // Borda Externa Sul
+            if (solidBot(ft) && !solidTop(getCellRoofType(fIndex, r + 1, c))) segments.push({x1: c, y1: r + 1, x2: c + 1, y2: r + 1});
+            // Borda Externa Oeste
+            if (solidLeft(ft) && !solidRight(getCellRoofType(fIndex, r, c - 1))) segments.push({x1: c, y1: r, x2: c, y2: r + 1});
+            // Borda Externa Leste
+            if (solidRight(ft) && !solidLeft(getCellRoofType(fIndex, r, c + 1))) segments.push({x1: c + 1, y1: r, x2: c + 1, y2: r + 1});
+
+            // As Diagonais que você exigiu (cortam no meio exato da célula)
+            if (ft === 2 || ft === 3) segments.push({x1: c, y1: r + 1, x2: c + 1, y2: r}); 
+            if (ft === 4 || ft === 5) segments.push({x1: c, y1: r, x2: c + 1, y2: r + 1});
+        }
+    }
+    return segments;
+}
+
 function precalculateRooms() {
     enclosedCache = {};
+    roofSegmentsCache = {};
     const floors = Object.keys(mapData).map(Number);
     for (const f of floors) {
         for (let r = 0; r < 10; r++) {
@@ -135,75 +174,52 @@ function precalculateRooms() {
                 enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
             }
         }
+        roofSegmentsCache[f] = buildRoofSegments(f);
     }
 }
 
-// A MATEMÁTICA REAL DO TELHADO (Medial Axis Euclidiano)
-function getRoofZ(fIndex, x, y, pitch) {
+// 2. A MATEMÁTICA DA ALTURA (Euclidiana Pura e Simplificada)
+function distToSegment(px, py, x1, y1, x2, y2) {
+    let l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+    if (l2 === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    let t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2));
+    return Math.sqrt((px - (x1 + t * (x2 - x1))) ** 2 + (py - (y1 + t * (y2 - y1))) ** 2);
+}
+
+function getNodeZ(fIndex, r, c, pitch) {
+    let segments = roofSegmentsCache[fIndex];
+    if (!segments || segments.length === 0) return 0;
+
     let minDist = Infinity;
-    for (let r = -2; r <= 11; r++) {
-        for (let c = -2; c <= 11; c++) {
-            let isSolid = false;
-            let ft = 0;
-            
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                ft = mapData[fIndex][r][c].floor;
-                isSolid = enclosedCache[`${fIndex},${r},${c}`] || ft > 0;
-            }
-
-            if (!isSolid) {
-                // Distância real de um ponto até o quadrado vazio mais próximo
-                let dx = Math.max(0, r - x, x - (r + 1));
-                let dy = Math.max(0, c - y, y - (c + 1));
-                let dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < minDist) minDist = dist;
-            } else if (ft >= 2 && ft <= 5) {
-                // DISTÂNCIA ATÉ A PAREDE DIAGONAL (A cura da sala octogonal)
-                let lx = x - r;
-                let ly = y - c;
-                let dist = Infinity;
-
-                if (ft === 2) dist = Math.max(0, 1 - (lx + ly)) / Math.SQRT2;      // Metade Noroeste vazia
-                else if (ft === 3) dist = Math.max(0, (lx + ly) - 1) / Math.SQRT2; // Metade Sudeste vazia
-                else if (ft === 4) dist = Math.max(0, lx - ly) / Math.SQRT2;       // Metade Sudoeste vazia
-                else if (ft === 5) dist = Math.max(0, ly - lx) / Math.SQRT2;       // Metade Nordeste vazia
-                
-                if (dist < minDist) minDist = dist;
-            }
-        }
+    for (let seg of segments) {
+        let d = distToSegment(c, r, seg.x1, seg.y1, seg.x2, seg.y2); // X é col(c), Y é row(r)
+        if (d < minDist) minDist = d;
     }
     return minDist * pitch;
 }
 
-// O SHADER 3D DIRECCIONAL (Calcula a luz de cada triângulo para sumir com as costuras)
+// 3. O PINTOR 3D 
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
-    if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
+    if (Math.abs(det) < 0.001) return 'rgba(0,0,0,0)'; 
 
     let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
     let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
-
+    
     let nx = -a; 
     let ny = -b;
     let eps = 0.01;
 
-    // Cumeeira/Topo plano
     if (Math.abs(nx) < eps && Math.abs(ny) < eps) return 'rgba(255,255,255,0.05)'; 
 
     let len = Math.sqrt(nx*nx + ny*ny + 1);
-    let dX = nx / len;
-    let dY = ny / len;
+    let dot = ((nx / len) * 0.707) + ((ny / len) * -0.707);
 
-    // Luz vindo do Sudoeste e de cima
-    let lightX = 0.707; 
-    let lightY = -0.707; 
-    let dot = (dX * lightX) + (dY * lightY);
-
-    if (dot > 0.4) return 'rgba(255, 255, 255, 0.15)'; // Face clara (Sol)
+    if (dot > 0.4) return 'rgba(255, 255, 255, 0.2)'; 
     if (dot > 0.1) return 'rgba(255, 255, 255, 0.05)'; 
     if (dot > -0.1) return 'rgba(0, 0, 0, 0.1)';      
-    if (dot > -0.4) return 'rgba(0, 0, 0, 0.25)';       
-    return 'rgba(0, 0, 0, 0.4)';                       // Face Escura (Sombra)
+    if (dot > -0.4) return 'rgba(0, 0, 0, 0.3)';       
+    return 'rgba(0, 0, 0, 0.5)';                      
 }
 
 function isFloorSupported(r, c) {
@@ -323,7 +339,6 @@ function floodFillFloor(startRow, startCol, paintMode, startQuad) {
     const queue = [{r: startRow, c: startCol, type: startType}];
     const visited = new Set();
     visited.add(`${startRow},${startCol}`);
-
     const lowerMap = currentFloor > 0 ? mapData[currentFloor - 1] : null;
 
     while(queue.length > 0) {
@@ -592,70 +607,31 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
         }
     } 
-
-    // FASE 1: O TELHADO (Com a Guilhotina Exata e a Malha Euclidiana)
+    // FASE 1: O TELHADO 3D (COM A NOVA ENGENHARIA DE NODOS / VERTICES E O 1 TRIÂNGULO ISOLADO)
     else if (renderPass === 1) {
         let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
-        let hasRoofSpace = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
+        let ft = getCellRoofType(fIndex, row, col);
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && hasRoofSpace && !hasStructureAbove(fIndex, row, col)) {
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && ft > 0 && !hasStructureAbove(fIndex, row, col)) {
             
-            let zN = getRoofZ(fIndex, row, col, roofPitch);
-            let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
-            let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
-            let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
-            let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
-            let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
-            let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
-            let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
-            let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
+            // Calcula o Z puro exatamente e apenas nas 4 pontas da célula!
+            let zN = getNodeZ(fIndex, row, col, roofPitch);
+            let zE = getNodeZ(fIndex, row, col + 1, roofPitch);
+            let zS = getNodeZ(fIndex, row + 1, col + 1, roofPitch);
+            let zW = getNodeZ(fIndex, row + 1, col, roofPitch);
 
             let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
-            let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
             let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
-            let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
             let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
-            let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
             let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
-            let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
-            let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
 
             let pN_3d = {x: row, y: col, z: zN};
-            let pNE_3d = {x: row, y: col + 0.5, z: zNE};
             let pE_3d = {x: row, y: col + 1, z: zE};
-            let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
             let pS_3d = {x: row + 1, y: col + 1, z: zS};
-            let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
             let pW_3d = {x: row + 1, y: col, z: zW};
-            let pNW_3d = {x: row + 0.5, y: col, z: zNW};
-            let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
 
             ctx.save();
-            let ft = targetMap[row][col].floor;
-            
-            // A GUILHOTINA: Usa os mesmos pontos exatos da pintura do chão para cortar o telhado na linha diagonal.
-            ctx.beginPath();
-            if (ft === 2) {
-                ctx.moveTo(pOeste.x, pOeste.y - blockHeight); ctx.lineTo(pNorte.x, pNorte.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-                ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
-            } else if (ft === 3) {
-                ctx.moveTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
-                ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
-            } else if (ft === 4) {
-                ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); ctx.lineTo(pNorte.x, pNorte.y - blockHeight);
-                ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
-            } else if (ft === 5) {
-                ctx.moveTo(pNorte.x, pNorte.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pSul.x, pSul.y - blockHeight);
-                ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
-            } else {
-                ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-                ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
-            }
-            ctx.closePath();
-            ctx.clip(); 
-
-            const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
-                if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1 && p3_3d.z <= 0.1) return;
+            const drawTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
                 if (overlay === 'rgba(0,0,0,0)') return;
 
@@ -663,19 +639,30 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.fillStyle = roofColor; ctx.fill();
                 ctx.fillStyle = overlay; ctx.fill();
                 
-                // Traço leve para ocultar costuras
-                ctx.strokeStyle = overlay; ctx.lineWidth = 1; ctx.stroke();
+                // Anti-Aliasing limpo nas bordas para sumir com as costuras
+                ctx.strokeStyle = overlay; ctx.lineWidth = 0.5; ctx.stroke();
             };
 
-            drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
-            drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
-            drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
-            drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
-            drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
-            drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
-            drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
-            drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
-            
+            // A LÓGICA DE LABORATÓRIO (Exatamente como o seu modelo aprovado)
+            if (ft === 1) {
+                // Desenha 2 triângulos respeitando a inclinação mais alta
+                if (zN + zS > zE + zW) {
+                    drawTri(t_pN, t_pE, t_pS, pN_3d, pE_3d, pS_3d);
+                    drawTri(t_pN, t_pS, t_pW, pN_3d, pS_3d, pW_3d);
+                } else {
+                    drawTri(t_pN, t_pE, t_pW, pN_3d, pE_3d, pW_3d);
+                    drawTri(t_pW, t_pE, t_pS, pW_3d, pE_3d, pS_3d);
+                }
+            } else if (ft === 2) {
+                drawTri(t_pE, t_pS, t_pW, pE_3d, pS_3d, pW_3d); // Quina perfeita SE
+            } else if (ft === 3) {
+                drawTri(t_pN, t_pW, t_pE, pN_3d, pW_3d, pE_3d); // Quina perfeita NW
+            } else if (ft === 4) {
+                drawTri(t_pN, t_pE, t_pS, pN_3d, pE_3d, pS_3d); // Quina perfeita NE
+            } else if (ft === 5) {
+                drawTri(t_pN, t_pS, t_pW, pN_3d, pS_3d, pW_3d); // Quina perfeita SW
+            }
+
             ctx.restore();
         }
     }
