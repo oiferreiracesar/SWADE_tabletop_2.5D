@@ -180,17 +180,15 @@ function precalculateRooms() {
     }
 }
 
-// O NOVO CÁLCULO EUCLIDIANO 3D: Detecta cantos e suaviza octógonos em pavilhões
+// O NOVO CÁLCULO EUCLIDIANO 3D: Resolve octógonos matematicamente com Teorema de Pitágoras
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
     
     for (let r = -2; r <= 11; r++) {
         for (let c = -2; c <= 11; c++) {
             let isEnclosed = false;
-            let ft = 0;
             if (r >= 0 && r < 10 && c >= 0 && c < 10) {
                 isEnclosed = enclosedCache[`${fIndex},${r},${c}`];
-                if (isEnclosed) ft = mapData[fIndex][r][c].floor;
             }
 
             if (!isEnclosed) {
@@ -199,8 +197,7 @@ function getRoofZ(fIndex, x, y, pitch) {
                 let dy = Math.max(0, c - y, y - (c + 1));
                 let d = Math.sqrt(dx * dx + dy * dy);
 
-                // A MÁGICA DOS OCTÓGONOS: Transforma os "degraus" vazios em linhas diagonais!
-                // Verifica se este bloco vazio tem paredes grudadas formando uma "quina interna"
+                // A MÁGICA DOS OCTÓGONOS: Avalia se é a quina vazia do "degrau" e arredonda a geometria
                 let encN = (r - 1 >= 0 && enclosedCache[`${fIndex},${r-1},${c}`]);
                 let encS = (r + 1 < 10 && enclosedCache[`${fIndex},${r+1},${c}`]);
                 let encW = (c - 1 >= 0 && enclosedCache[`${fIndex},${r},${c-1}`]);
@@ -209,19 +206,9 @@ function getRoofZ(fIndex, x, y, pitch) {
                 let lx = x - r;
                 let ly = y - c;
 
-                // Corta a distância usando a fórmula da reta (Math.SQRT2)
-                if (encE && encS) d = Math.min(d, Math.abs(lx + ly - 1) / Math.SQRT2); // Quina Noroeste
-                if (encW && encN) d = Math.min(d, Math.abs(lx + ly - 1) / Math.SQRT2); // Quina Sudeste
-                if (encW && encS) d = Math.min(d, Math.abs(lx - ly) / Math.SQRT2);     // Quina Nordeste
-                if (encE && encN) d = Math.min(d, Math.abs(lx - ly) / Math.SQRT2);     // Quina Sudoeste
+                if ((encS && encE) || (encN && encW)) d = Math.min(d, Math.abs(lx + ly - 1) / Math.SQRT2);
+                if ((encN && encE) || (encS && encW)) d = Math.min(d, Math.abs(lx - ly) / Math.SQRT2);
 
-                if (d < minDist) minDist = d;
-            } 
-            else if (ft >= 2 && ft <= 5) {
-                // Suporte extra: Se o jogador pintar um piso diagonal manualmente
-                let lx = x - r;
-                let ly = y - c;
-                let d = (ft === 2 || ft === 3) ? Math.abs(lx + ly - 1) / Math.SQRT2 : Math.abs(lx - ly) / Math.SQRT2;
                 if (d < minDist) minDist = d;
             }
         }
@@ -229,12 +216,11 @@ function getRoofZ(fIndex, x, y, pitch) {
     return Math.max(0, minDist) * pitch;
 }
 
-// NOVO SHADER DE LUZ (Dot Product / Iluminação Direcional)
+// SHADER DE LUZ 3D
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
     if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
 
-    // Calcula a inclinação (A normal do polígono)
     let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
     let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
 
@@ -242,26 +228,21 @@ function getTriangleShade(p1, p2, p3) {
     let ny = -b;
     let eps = 0.05;
 
-    // Se o triângulo for plano (Cumeeira de telhados estilo Mansard)
     if (Math.abs(nx) < eps && Math.abs(ny) < eps) return 'rgba(255,255,255,0.05)'; 
 
-    // Normaliza o vetor 3D
     let len = Math.sqrt(nx*nx + ny*ny + 1);
     let dX = nx / len;
     let dY = ny / len;
 
-    // A Posição do Sol (Sudoeste Alto) - Brilha de frente para a câmera
     let lightX = 0.7; 
     let lightY = -0.3; 
-
     let dot = (dX * lightX) + (dY * lightY);
 
-    // Mapeamento dinâmico: Gera os 8 tons exatos para que os octógonos fiquem lisos
-    if (dot > 0.3) return 'rgba(255, 255, 255, 0.15)'; // Encosta Sudoeste (Sol direto)
-    if (dot > 0.0) return 'rgba(255, 255, 255, 0.05)'; // Faces laterais claras
-    if (dot > -0.3) return 'rgba(0, 0, 0, 0.15)';      // Sombras Intermediárias
-    if (dot > -0.6) return 'rgba(0, 0, 0, 0.3)';       // Encosta Leste / Nordeste
-    return 'rgba(0, 0, 0, 0.45)';                      // Encosta Sudeste (Sombra Forte)
+    if (dot > 0.3) return 'rgba(255, 255, 255, 0.15)'; 
+    if (dot > 0.0) return 'rgba(255, 255, 255, 0.05)'; 
+    if (dot > -0.3) return 'rgba(0, 0, 0, 0.15)';      
+    if (dot > -0.6) return 'rgba(0, 0, 0, 0.3)';       
+    return 'rgba(0, 0, 0, 0.45)';                      
 }
 
 function isFloorSupported(r, c) {
@@ -557,7 +538,7 @@ function updatePreview() {
     }
 }
 
-// O RENDERIZADOR ISOMÉTRICO (Fases desativadas! O Z-Sorting Clássico voltou)
+// O RENDERIZADOR 
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
@@ -650,13 +631,32 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     } 
 
-    // FASE 1: O TELHADO 3D (Corte e Sombras Contínuas)
+    // FASE 1: O TELHADO 3D (COM A NOVA MÁSCARA DIAGONAL)
     else if (renderPass === 1) {
         let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
+        let bounds = cellToRoofBoundsCache[`${fIndex},${row},${col}`];
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && bounds && !hasStructureAbove(fIndex, row, col)) {
             
-            // Distância matemática Euclidiana de cada vértice para a borda!
+            let isEnclosedCell = enclosedCache[`${fIndex},${row},${col}`];
+            let clipPath = [];
+
+            // A MÁGICA DA MÁSCARA: Transforma a máscara em triângulo quando é a borda diagonal do octógono!
+            if (isEnclosedCell) {
+                clipPath = [pNorte, pLeste, pSul, pOeste];
+            } else {
+                let encN = (row - 1 >= 0 && enclosedCache[`${fIndex},${row-1},${col}`]);
+                let encS = (row + 1 < 10 && enclosedCache[`${fIndex},${row+1},${col}`]);
+                let encW = (col - 1 >= 0 && enclosedCache[`${fIndex},${row},${col-1}`]);
+                let encE = (col + 1 < 10 && enclosedCache[`${fIndex},${row},${col+1}`]);
+
+                if (encS && encE) clipPath = [pLeste, pSul, pOeste]; 
+                else if (encN && encW) clipPath = [pLeste, pNorte, pOeste]; 
+                else if (encN && encE) clipPath = [pNorte, pLeste, pSul]; 
+                else if (encS && encW) clipPath = [pNorte, pOeste, pSul]; 
+                else return; // Aqui nós removemos permanentemente a "Sobra Cinza no Chão"! 
+            }
+
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
             let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
@@ -687,55 +687,21 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             let pNW_3d = {x: row + 0.5, y: col, z: zNW};
             let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
 
+            // Aplica a guilhotina diagonal no Canvas!
             ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(clipPath[0].x, clipPath[0].y - blockHeight);
+            for (let i = 1; i < clipPath.length; i++) {
+                ctx.lineTo(clipPath[i].x, clipPath[i].y - blockHeight);
+            }
+            for (let i = clipPath.length - 1; i >= 0; i--) {
+                ctx.lineTo(clipPath[i].x, clipPath[i].y - blockHeight - 2000);
+            }
+            ctx.closePath();
+            ctx.clip();
 
-            // A NOVA GUILHOTINA DIAGONAL: Corta o telhado no formato exato da parede!
-        let ft = targetMap[row][col].floor;
-        ctx.beginPath();
-        if (ft === 2) {
-            ctx.moveTo(pOeste.x, pOeste.y - blockHeight);
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
-        } else if (ft === 3) {
-            ctx.moveTo(pOeste.x, pOeste.y - blockHeight);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
-        } else if (ft === 4) {
-            ctx.moveTo(pNorte.x, pNorte.y - blockHeight);
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
-        } else if (ft === 5) {
-            ctx.moveTo(pNorte.x, pNorte.y - blockHeight);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight);
-            ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
-        } else {
-            // Quadrado padrão
-            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
-        }
-        ctx.closePath();
-        ctx.clip();
-        
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
-                // Se todo o triângulo estiver grudado no chão do lado de fora, a gente ignora.
                 if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1 && p3_3d.z <= 0.1) return;
-
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
                 if (overlay === 'rgba(0,0,0,0)') return;
 
@@ -745,7 +711,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 0.5; ctx.stroke();
             };
 
-            // Desenha os 8 fragmentos da malha em cima da célula
             drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
             drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
             drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
@@ -802,9 +767,6 @@ function drawIsometricGrid() {
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    // A MÁGICA DA OCLUSÃO ISOMÉTRICA!
-    // As células são desenhadas DE TRÁS PARA FRENTE de forma integral. A parede do 2º andar desenha 
-    // POR CIMA do teto do 1º andar.
     let renderQueue = [];
     for (const f of floors) {
         if (currentFloor < 0 && f >= 0) continue;
