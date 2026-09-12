@@ -882,5 +882,16 @@ document.getElementById('btnUndo').addEventListener('click', () => {
     window.dispatchEvent(event);
 });
 
+// NOVA FUNÇÃO DE TELA: Mantém a resolução 1:1 com o monitor e o mouse
+function resizeCanvas() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    originX = canvas.width / 2; // Recalcula o centro da tela perfeitamente
+    drawIsometricGrid();
+}
+
+window.addEventListener('resize', resizeCanvas);
+
+// Inicializa a UI e a Tela no tamanho correto
 updateUI();
-drawIsometricGrid();
+resizeCanvas();
