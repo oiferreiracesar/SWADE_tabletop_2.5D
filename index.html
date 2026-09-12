@@ -1,97 +1,74 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>RPG Isométrico - Construtor</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Laboratório de Telhado 3D</title>
+    <style>
+        body { background-color: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; color: white; font-family: sans-serif; flex-direction: column;}
+        canvas { border: 1px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    </style>
 </head>
 <body>
-    <div id="sidebar">
-        <h2>Modo Construção</h2>
-        
-        <div class="tool-section">
-            <h3>Ferramentas Básicas</h3>
-            <button id="btnPiso" class="tool-btn active">Piso (1)</button>
-            <button id="btnParede" class="tool-btn">Parede Flex (2)</button>
-            <button id="btnColuna" class="tool-btn">Coluna (6)</button>
-            <button id="btnBorracha" class="tool-btn">Borracha (Segure Ctrl)</button>
-        </div>
+    <h2>Rampa Diagonal Isolada (Quina do Octógono)</h2>
+    <canvas id="sandbox" width="400" height="400"></canvas>
 
-        <div class="tool-section">
-            <h3>Cômodos Prontos</h3>
-            <button id="btnRoomRect" class="tool-btn">Sala Retangular (3)</button>
-            <button id="btnRoomTri" class="tool-btn">Sala Triangular (4)</button>
-            <button id="btnRoomOct" class="tool-btn">Sala Octogonal (5)</button>
-        </div>
+    <script>
+        const canvas = document.getElementById('sandbox');
+        const ctx = canvas.getContext('2d');
 
-        <div class="tool-section">
-            <h3>Navegação de Andares</h3>
-            <div style="display: flex; gap: 5px;">
-                <button id="btnFloorDown" style="flex: 1; text-align: center;">↓ Descer</button>
-                <button id="btnFloorUp" style="flex: 1; text-align: center;">↑ Subir</button>
-            </div>
-            <p id="floorLabel" style="font-size: 13px; color: #38bdf8; margin: 8px 0 0 0; font-weight: bold;">
-                Andar Atual: Térreo (0)
-            </p>
-        </div>
+        const tw = 128;  // Largura do tile
+        const th = 64;   // Altura do tile
+        const ox = 200;  // Centro X
+        const oy = 250;  // Centro Y (Chão)
+        const wallH = 64; // Altura da Parede
+        const roofH = 64; // Altura do Telhado (Z)
 
-        <div class="tool-section">
-            <h3>Altura da Parede: <span id="valorAltura">48</span>px</h3>
-            <input type="range" id="sliderAltura" min="12" max="120" value="48" style="width: 100%; cursor: pointer;">
-        </div>
+        // 1. As coordenadas isométricas base do quadrado
+        const pN = { x: ox, y: oy - th };
+        const pE = { x: ox + tw/2, y: oy - th/2 };
+        const pS = { x: ox, y: oy };
+        const pW = { x: ox - tw/2, y: oy - th/2 };
 
-        <!-- ATUALIZADO: Dropdown cravado nas alturas que você pediu -->
-        <div class="tool-section">
-            <h3>Inclinação do Telhado</h3>
-            <select id="roofPitchSelect" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                <option value="6">Baixa (6px)</option>
-                <option value="12">Média (12px)</option>
-                <option value="24" selected>Alta (24px - Metade da Parede)</option>
-            </select>
-        </div>
+        // 2. O CHÃO CORTADO (Tipo 2 - Quina Noroeste do Octógono)
+        ctx.fillStyle = 'rgba(100, 200, 100, 0.4)';
+        ctx.beginPath();
+        ctx.moveTo(pN.x, pN.y); ctx.lineTo(pE.x, pE.y); ctx.lineTo(pW.x, pW.y);
+        ctx.closePath(); ctx.fill();
 
-        <div class="tool-section">
-            <h3>Cores do Cenário</h3>
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Superfície: 
-                    <input type="color" id="colorSurface" value="#1e293b" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Fundo Subsolo: 
-                    <input type="color" id="colorUnderground" value="#0a0705" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Terra Maciça: 
-                    <input type="color" id="colorDirt" value="#1e140f" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-                <label style="font-size: 13px; color: #ccc; display: flex; justify-content: space-between; align-items: center;">
-                    Cor do Telhado: 
-                    <input type="color" id="colorRoof" value="#475569" style="cursor: pointer; width: 40px; height: 24px; padding: 0; border: none;">
-                </label>
-            </div>
-        </div>
+        // 3. A PAREDE DIAGONAL (Liga o Oeste ao Leste)
+        ctx.fillStyle = '#c62828';
+        ctx.beginPath();
+        ctx.moveTo(pW.x, pW.y); 
+        ctx.lineTo(pE.x, pE.y); 
+        ctx.lineTo(pE.x, pE.y - wallH); // Sobe a parede no Leste
+        ctx.lineTo(pW.x, pW.y - wallH); // Sobe a parede no Oeste
+        ctx.closePath(); 
+        ctx.fill();
+        ctx.strokeStyle = '#222'; ctx.stroke();
 
-        <div class="tool-section">
-            <h3>Configurações Visuais</h3>
-            <button id="btnCutaway" class="action-btn">Paredes: CORTADAS (C)</button>
-        </div>
+        // 4. A GEOMETRIA PURA DO TELHADO 3D (A Rampa)
+        // Ponto Norte sobe tudo (parede + telhado). Oeste e Leste param na altura exata da parede.
+        const rN = { x: pN.x, y: pN.y - wallH - roofH };
+        const rE = { x: pE.x, y: pE.y - wallH };
+        const rW = { x: pW.x, y: pW.y - wallH };
 
-        <div class="tool-section">
-            <h3>Controles de Projeto</h3>
-            <button id="btnUndo" class="action-btn">Desfazer Ação (Ctrl+Z)</button>
-        </div>
+        ctx.fillStyle = '#475569'; // Cor base do telhado
+        ctx.beginPath();
+        ctx.moveTo(rN.x, rN.y);
+        ctx.lineTo(rE.x, rE.y);
+        ctx.lineTo(rW.x, rW.y);
+        ctx.closePath();
+        ctx.fill();
 
-        <div id="instructions">
-            <p><strong>Arraste o mouse:</strong> Criar linhas/áreas</p>
-            <p><strong>Shift + Clique:</strong> Preencher cômodo</p>
-        </div>
-    </div>
+        // Simulação do Shader de Luz (Bate na inclinação)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; 
+        ctx.fill();
+        ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2; ctx.stroke();
 
-    <div id="canvas-container">
-        <canvas id="gameCanvas"></canvas>
-    </div>
-
-    <script src="script.js"></script>
+        // Pontos de marcação para você visualizar os vértices
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(rN.x - 3, rN.y - 3, 6, 6); // Topo (Pico)
+        ctx.fillRect(rE.x - 3, rE.y - 3, 6, 6); // Quina Direita
+        ctx.fillRect(rW.x - 3, rW.y - 3, 6, 6); // Quina Esquerda
+    </script>
 </body>
 </html>
