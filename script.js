@@ -188,29 +188,34 @@ function getRoofZ(fIndex, x, y, pitch) {
         for (let c = -2; c <= 11; c++) {
             let isEnclosedCell = false;
             let ft = 0;
+            
             if (r >= 0 && r < 10 && c >= 0 && c < 10) {
                 isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
                 if (isEnclosedCell) ft = mapData[fIndex][r][c].floor;
             }
 
             if (!isEnclosedCell) {
-                // Cálculo de Distância Euclidiana para um quadrado vazio
+                // Distância Euclidiana Real para a borda de um quadrado vazio
                 let dx = Math.max(0, r - x, x - (r + 1));
                 let dy = Math.max(0, c - y, y - (c + 1));
                 let d = Math.sqrt(dx * dx + dy * dy);
                 if (d < minDist) minDist = d;
-            } else if (ft >= 2 && ft <= 5) {
-                // Se a célula for uma sala diagonal, o telhado para na linha da parede!
-                let x1, y1, x2, y2;
-                if (ft === 2 || ft === 3) { x1 = r; y1 = c + 1; x2 = r + 1; y2 = c; } // Diagonal Noroeste / Sudeste
-                else { x1 = r; y1 = c; x2 = r + 1; y2 = c + 1; } // Diagonal Sudoeste / Nordeste
+            } 
+            else if (ft >= 2 && ft <= 5) {
+                // A MÁGICA DOS OCTÓGONOS: Distância matemática do ponto até a linha de corte da diagonal
+                let d = Infinity;
+                let lx = x - r; // Coordenada X local dentro da célula
+                let ly = y - c; // Coordenada Y local dentro da célula
                 
-                // Distância matemática do ponto (x,y) até a linha diagonal da célula
-                let l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
-                let t = Math.max(0, Math.min(1, ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / l2));
-                let pxProj = x1 + t * (x2 - x1);
-                let pyProj = y1 + t * (y2 - y1);
-                let d = Math.sqrt((x - pxProj) * (x - pxProj) + (y - pyProj) * (y - pyProj));
+                if (ft === 2 || ft === 3) {
+                    // Células com diagonal Noroeste / Sudeste (Equação da reta: X + Y - 1 = 0)
+                    d = Math.abs(lx + ly - 1) / Math.SQRT2;
+                } 
+                else if (ft === 4 || ft === 5) {
+                    // Células com diagonal Sudoeste / Nordeste (Equação da reta: X - Y = 0)
+                    d = Math.abs(lx - ly) / Math.SQRT2;
+                }
+                
                 if (d < minDist) minDist = d;
             }
         }
