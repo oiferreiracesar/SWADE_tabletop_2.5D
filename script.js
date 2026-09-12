@@ -216,12 +216,16 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
+// A CORREÇÃO DE OURO DA SUA ANÁLISE!
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
-    const cell = upper[r][c];
-    if (cell.floor > 0 || cell.column > 0 || cell.wallL > 0 || cell.wallR > 0 || cell.wallWE > 0 || cell.wallNS > 0) return true;
+    
+    // Agora o telhado só é cortado se a célula de cima for realmente o interior de uma sala ou tiver piso!
+    // Removemos a verificação de paredes, impedindo que a "grid ao redor da parede superior" bloqueie o telhado de baixo.
+    if (upper[r][c].floor > 0) return true;
     if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true;
+    
     return false;
 }
 
@@ -392,7 +396,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
     } 
 
-    // FASE 1: O TELHADO 3D COM AS SAIAS VEDANTES CORRIGIDAS
     else if (renderPass === 1) {
         let hideLowerRoof = false;
         if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
@@ -452,14 +455,14 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             };
 
             const drawSkirt = (p1_2d, p2_2d, p1_3d, p2_3d, overlay) => {
-                if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1) return; // Se a lona já morreu no teto, não precisa de saia!
+                if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1) return;
                 
                 ctx.fillStyle = roofColor;
                 ctx.beginPath();
                 ctx.moveTo(p1_2d.x, p1_2d.y); 
                 ctx.lineTo(p2_2d.x, p2_2d.y); 
-                ctx.lineTo(p2_2d.x, p2_2d.y + p2_3d.z); // Cai perfeitamente no teto
-                ctx.lineTo(p1_2d.x, p1_2d.y + p1_3d.z); // Cai perfeitamente no teto
+                ctx.lineTo(p2_2d.x, p2_2d.y + p2_3d.z);
+                ctx.lineTo(p1_2d.x, p1_2d.y + p1_3d.z);
                 ctx.closePath();
                 ctx.fill();
                 
@@ -471,20 +474,19 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.stroke();
             };
 
-            // COORDENADAS CORRIGIDAS: Cada face ganha sua saia perfeitamente mapeada sem misturar os eixos
-            if (!neighborHasRoof(row - 1, col)) { // Parede Nordeste (NE Edge)
+            if (!neighborHasRoof(row - 1, col)) { 
                 drawSkirt(t_pN, t_pNE, pN_3d, pNE_3d, 'rgba(0,0,0,0.1)');
                 drawSkirt(t_pNE, t_pE, pNE_3d, pE_3d, 'rgba(0,0,0,0.1)');
             }
-            if (!neighborHasRoof(row, col + 1)) { // Parede Sudeste (SE Edge)
+            if (!neighborHasRoof(row, col + 1)) { 
                 drawSkirt(t_pE, t_pSE, pE_3d, pSE_3d, 'rgba(0,0,0,0.4)');
                 drawSkirt(t_pSE, t_pS, pSE_3d, pS_3d, 'rgba(0,0,0,0.4)');
             }
-            if (!neighborHasRoof(row + 1, col)) { // Parede Sudoeste (SW Edge)
+            if (!neighborHasRoof(row + 1, col)) { 
                 drawSkirt(t_pS, t_pSW, pS_3d, pSW_3d, 'rgba(255,255,255,0.15)');
                 drawSkirt(t_pSW, t_pW, pSW_3d, pW_3d, 'rgba(255,255,255,0.15)');
             }
-            if (!neighborHasRoof(row, col - 1)) { // Parede Noroeste (NW Edge)
+            if (!neighborHasRoof(row, col - 1)) { 
                 drawSkirt(t_pW, t_pNW, pW_3d, pNW_3d, 'rgba(0,0,0,0.3)');
                 drawSkirt(t_pNW, t_pN, pNW_3d, pN_3d, 'rgba(0,0,0,0.3)');
             }
