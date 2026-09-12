@@ -36,7 +36,7 @@ let mapData = {};
 let map; 
 
 let enclosedCache = {};
-let cellToRoofBoundsCache = {};
+let roomBoundsCache = {};
 
 function createEmptyMap() {
     const newMap = [];
@@ -129,7 +129,7 @@ function isEnclosed(fIndex, startRow, startCol) {
 
 function precalculateRooms() {
     enclosedCache = {};
-    cellToRoofBoundsCache = {};
+    roomBoundsCache = {};
     const floors = Object.keys(mapData).map(Number);
     
     for (const f of floors) {
@@ -145,10 +145,12 @@ function precalculateRooms() {
                 if (enclosedCache[`${f},${r},${c}`] && !visited.has(`${r},${c}`)) {
                     let minR = r, maxR = r, minC = c, maxC = c;
                     const queue = [{r, c}];
+                    const roomCells = [];
                     visited.add(`${r},${c}`);
                     
                     while (queue.length > 0) {
                         const curr = queue.shift();
+                        roomCells.push(curr);
                         minR = Math.min(minR, curr.r);
                         maxR = Math.max(maxR, curr.r);
                         minC = Math.min(minC, curr.c);
@@ -167,82 +169,14 @@ function precalculateRooms() {
                             }
                         }
                     }
-                    
                     const bounds = {minR, maxR, minC, maxC};
-                    for (let rr = minR; rr <= maxR; rr++) {
-                        for (let cc = minC; cc <= maxC; cc++) {
-                            cellToRoofBoundsCache[`${f},${rr},${cc}`] = bounds;
-                        }
+                    for (let cell of roomCells) {
+                        roomBoundsCache[`${f},${cell.r},${cell.c}`] = bounds;
                     }
                 }
             }
         }
     }
-}
-
-// O NOVO CÁLCULO EUCLIDIANO 3D: Resolve octógonos matematicamente com Teorema de Pitágoras
-function getRoofZ(fIndex, x, y, pitch) {
-    let minDist = Infinity;
-    
-    for (let r = -2; r <= 11; r++) {
-        for (let c = -2; c <= 11; c++) {
-            let isEnclosed = false;
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                isEnclosed = enclosedCache[`${fIndex},${r},${c}`];
-            }
-
-            if (!isEnclosed) {
-                // Distância Euclidiana Padrão para blocos de ar
-                let dx = Math.max(0, r - x, x - (r + 1));
-                let dy = Math.max(0, c - y, y - (c + 1));
-                let d = Math.sqrt(dx * dx + dy * dy);
-
-                // A MÁGICA DOS OCTÓGONOS: Avalia se é a quina vazia do "degrau" e arredonda a geometria
-                let encN = (r - 1 >= 0 && enclosedCache[`${fIndex},${r-1},${c}`]);
-                let encS = (r + 1 < 10 && enclosedCache[`${fIndex},${r+1},${c}`]);
-                let encW = (c - 1 >= 0 && enclosedCache[`${fIndex},${r},${c-1}`]);
-                let encE = (c + 1 < 10 && enclosedCache[`${fIndex},${r},${c+1}`]);
-
-                let lx = x - r;
-                let ly = y - c;
-
-                if ((encS && encE) || (encN && encW)) d = Math.min(d, Math.abs(lx + ly - 1) / Math.SQRT2);
-                if ((encN && encE) || (encS && encW)) d = Math.min(d, Math.abs(lx - ly) / Math.SQRT2);
-
-                if (d < minDist) minDist = d;
-            }
-        }
-    }
-    return Math.max(0, minDist) * pitch;
-}
-
-// SHADER DE LUZ 3D
-function getTriangleShade(p1, p2, p3) {
-    let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
-    if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
-
-    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
-    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
-
-    let nx = -a; 
-    let ny = -b;
-    let eps = 0.05;
-
-    if (Math.abs(nx) < eps && Math.abs(ny) < eps) return 'rgba(255,255,255,0.05)'; 
-
-    let len = Math.sqrt(nx*nx + ny*ny + 1);
-    let dX = nx / len;
-    let dY = ny / len;
-
-    let lightX = 0.7; 
-    let lightY = -0.3; 
-    let dot = (dX * lightX) + (dY * lightY);
-
-    if (dot > 0.3) return 'rgba(255, 255, 255, 0.15)'; 
-    if (dot > 0.0) return 'rgba(255, 255, 255, 0.05)'; 
-    if (dot > -0.3) return 'rgba(0, 0, 0, 0.15)';      
-    if (dot > -0.6) return 'rgba(0, 0, 0, 0.3)';       
-    return 'rgba(0, 0, 0, 0.45)';                      
 }
 
 function isFloorSupported(r, c) {
@@ -538,7 +472,6 @@ function updatePreview() {
     }
 }
 
-// O RENDERIZADOR 
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
@@ -630,97 +563,77 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
         }
     } 
-
-    // FASE 1: O TELHADO 3D (COM A NOVA MÁSCARA DIAGONAL)
+    // FASE 1: O TELHADO ORIGINAL, BONITO E SÓLIDO (COM O RECORTE DIAGONAL)
     else if (renderPass === 1) {
         let hideLowerRoof = fIndex < currentFloor && isFloorEmpty(currentFloor);
-        let bounds = cellToRoofBoundsCache[`${fIndex},${row},${col}`];
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && bounds && !hasStructureAbove(fIndex, row, col)) {
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && enclosedCache[`${fIndex},${row},${col}`] && !hasStructureAbove(fIndex, row, col)) {
+            const bounds = roomBoundsCache[`${fIndex},${row},${col}`];
             
-            let isEnclosedCell = enclosedCache[`${fIndex},${row},${col}`];
-            let clipPath = [];
+            let c_pN = gridToScreen(bounds.minR, bounds.minC);
+            let c_pE = gridToScreen(bounds.minR, bounds.maxC + 1);
+            let c_pS = gridToScreen(bounds.maxR + 1, bounds.maxC + 1);
+            let c_pW = gridToScreen(bounds.maxR + 1, bounds.minC);
+            
+            c_pN.y -= blockHeight;
+            c_pE.y -= blockHeight;
+            c_pS.y -= blockHeight;
+            c_pW.y -= blockHeight;
 
-            // A MÁGICA DA MÁSCARA: Transforma a máscara em triângulo quando é a borda diagonal do octógono!
-            if (isEnclosedCell) {
-                clipPath = [pNorte, pLeste, pSul, pOeste];
-            } else {
-                let encN = (row - 1 >= 0 && enclosedCache[`${fIndex},${row-1},${col}`]);
-                let encS = (row + 1 < 10 && enclosedCache[`${fIndex},${row+1},${col}`]);
-                let encW = (col - 1 >= 0 && enclosedCache[`${fIndex},${row},${col-1}`]);
-                let encE = (col + 1 < 10 && enclosedCache[`${fIndex},${row},${col+1}`]);
+            let midR = (bounds.minR + bounds.maxR + 1) / 2;
+            let midC = (bounds.minC + bounds.maxC + 1) / 2;
+            let peak = gridToScreen(midR, midC);
+            
+            let size = Math.max(bounds.maxR - bounds.minR + 1, bounds.maxC - bounds.minC + 1);
+            let roofHeight = (size / 2) * roofPitch;
+            peak.y -= (blockHeight + roofHeight);
 
-                if (encS && encE) clipPath = [pLeste, pSul, pOeste]; 
-                else if (encN && encW) clipPath = [pLeste, pNorte, pOeste]; 
-                else if (encN && encE) clipPath = [pNorte, pLeste, pSul]; 
-                else if (encS && encW) clipPath = [pNorte, pOeste, pSul]; 
-                else return; // Aqui nós removemos permanentemente a "Sobra Cinza no Chão"! 
-            }
-
-            let zN = getRoofZ(fIndex, row, col, roofPitch);
-            let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
-            let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
-            let zSE = getRoofZ(fIndex, row + 0.5, col + 1, roofPitch);
-            let zS = getRoofZ(fIndex, row + 1, col + 1, roofPitch);
-            let zSW = getRoofZ(fIndex, row + 1, col + 0.5, roofPitch);
-            let zW = getRoofZ(fIndex, row + 1, col, roofPitch);
-            let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
-            let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
-
-            let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
-            let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
-            let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
-            let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
-            let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
-            let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
-            let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
-            let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
-            let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
-
-            let pN_3d = {x: row, y: col, z: zN};
-            let pNE_3d = {x: row, y: col + 0.5, z: zNE};
-            let pE_3d = {x: row, y: col + 1, z: zE};
-            let pSE_3d = {x: row + 0.5, y: col + 1, z: zSE};
-            let pS_3d = {x: row + 1, y: col + 1, z: zS};
-            let pSW_3d = {x: row + 1, y: col + 0.5, z: zSW};
-            let pW_3d = {x: row + 1, y: col, z: zW};
-            let pNW_3d = {x: row + 0.5, y: col, z: zNW};
-            let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
-
-            // Aplica a guilhotina diagonal no Canvas!
             ctx.save();
+            let ft = targetMap[row][col].floor;
+            
+            // A MÁSCARA DIAGONAL: Exatamente o que você pediu. Corta a sobra da lona no formato da parede diagonal.
             ctx.beginPath();
-            ctx.moveTo(clipPath[0].x, clipPath[0].y - blockHeight);
-            for (let i = 1; i < clipPath.length; i++) {
-                ctx.lineTo(clipPath[i].x, clipPath[i].y - blockHeight);
-            }
-            for (let i = clipPath.length - 1; i >= 0; i--) {
-                ctx.lineTo(clipPath[i].x, clipPath[i].y - blockHeight - 2000);
+            if (ft === 2) {
+                ctx.moveTo(pOeste.x, pOeste.y - blockHeight); ctx.lineTo(pNorte.x, pNorte.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight);
+                ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000);
+            } else if (ft === 3) {
+                ctx.moveTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pOeste.x, pOeste.y - blockHeight);
+                ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000);
+            } else if (ft === 4) {
+                ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); ctx.lineTo(pNorte.x, pNorte.y - blockHeight);
+                ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000);
+            } else if (ft === 5) {
+                ctx.moveTo(pNorte.x, pNorte.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pSul.x, pSul.y - blockHeight);
+                ctx.lineTo(pSul.x, pSul.y - blockHeight - 2000); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000);
+            } else {
+                ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
+                ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
             }
             ctx.closePath();
-            ctx.clip();
+            ctx.clip(); 
 
-            const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
-                if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1 && p3_3d.z <= 0.1) return;
-                let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
-                if (overlay === 'rgba(0,0,0,0)') return;
-
-                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
-                ctx.fillStyle = roofColor; ctx.fill();
-                ctx.fillStyle = overlay; ctx.fill();
-                ctx.strokeStyle = roofColor; ctx.lineWidth = 0.5; ctx.stroke();
+            // Os 4 grandes painéis lisos originais (Sem a maldita "Caixa de Ovo")
+            const drawTri = (p1, p2, p3, overlay) => {
+                ctx.fillStyle = roofColor;
+                ctx.beginPath(); 
+                ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); 
+                ctx.closePath(); 
+                ctx.fill();
+                
+                ctx.fillStyle = overlay; 
+                ctx.fill();
+                
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)'; 
+                ctx.lineWidth = 1; 
+                ctx.stroke();
             };
 
-            drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
-            drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
-            drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
-            drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
-            drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
-            drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
-            drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
-            drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
-            
-            ctx.restore();
+            drawTri(c_pN, c_pW, peak, 'rgba(0,0,0,0.3)'); 
+            drawTri(c_pN, c_pE, peak, 'rgba(0,0,0,0.1)'); 
+            drawTri(c_pW, c_pS, peak, 'rgba(255,255,255,0.15)'); 
+            drawTri(c_pS, c_pE, peak, 'rgba(0,0,0,0.4)'); 
+
+            ctx.restore(); 
         }
     }
 
