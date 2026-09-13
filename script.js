@@ -13,7 +13,7 @@ let cameraZoom = 1.0;
 const ZOOM_SPEED = 0.1;
 let originX = 0; 
 let originY = 0;
-const keys = {}; 
+const keys = {}; // Guarda o estado das teclas WASD
 
 const levelHeight = 48; 
 let blockHeight = 48; 
@@ -50,7 +50,7 @@ const patterns = {};
 let currentTexture = 'madeira';
 
 // ==========================================
-// 3. INICIALIZAÇÃO SEGURA E GAME LOOP
+// 3. INICIALIZAÇÃO SEGURA
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('gameCanvas');
@@ -61,7 +61,7 @@ window.addEventListener('DOMContentLoaded', () => {
     mapData[0] = createEmptyMap();
     map = mapData[0];
 
-    // Constrói UI de Texturas de forma dinâmica
+    // Constrói UI de Texturas dinamicamente
     if (texturePalette) {
         Object.keys(textureURLs).forEach(key => {
             let wrapper = document.createElement('div');
@@ -70,6 +70,8 @@ window.addEventListener('DOMContentLoaded', () => {
             let btn = document.createElement('div');
             btn.className = 'texture-btn ' + (key === currentTexture ? 'selected' : '');
             btn.style.backgroundImage = `url(${textureURLs[key]})`;
+            
+            // Lógica inteligente: Clicar numa textura ativa a pintura automaticamente
             btn.onclick = () => {
                 currentTexture = key;
                 document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
@@ -90,11 +92,11 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Carrega Texturas com proteção Anti-Crash
+    // Carrega Texturas com proteção Anti-Crash (CORS)
     Object.keys(textureURLs).forEach(key => {
         let img = new Image();
         img.crossOrigin = "Anonymous";
-        img.onerror = () => console.warn("Textura não carregou: " + key);
+        img.onerror = () => console.warn(`Falha ao carregar a textura: ${key}`);
         img.src = textureURLs[key];
         img.onload = () => {
             patterns[key] = ctx.createPattern(img, 'repeat');
@@ -105,9 +107,10 @@ window.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     resizeCanvas();
     updateUI();
-    requestAnimationFrame(gameLoop);
+    requestAnimationFrame(gameLoop); // Dá a partida no motor WASD
 });
 
+// Calcula perfeitamente a resolução do monitor
 function resizeCanvas() {
     if (!canvas) return;
     let w = container ? container.clientWidth : window.innerWidth - 280;
@@ -121,6 +124,7 @@ function resizeCanvas() {
     drawIsometricGrid();
 }
 
+// O Motor Físico (60 frames por segundo para Câmera lisa)
 function gameLoop() {
     let moved = false;
     const speed = 15 / cameraZoom; 
@@ -187,11 +191,10 @@ function setupEventListeners() {
         drawIsometricGrid();
     }, { passive: false });
 
-    // Botões Seguros (Anti-Null)
     document.getElementById('btnZoomIn')?.addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
     document.getElementById('btnZoomOut')?.addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
-    document.getElementById('btnRotL')?.addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
-    document.getElementById('btnRotR')?.addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
+    document.getElementById('btnRotL')?.addEventListener('click', () => { alert("Giro isométrico será o próximo passo!"); });
+    document.getElementById('btnRotR')?.addEventListener('click', () => { alert("Giro isométrico será o próximo passo!"); });
 
     document.getElementById('btnFloorUp')?.addEventListener('click', () => changeFloor(1));
     document.getElementById('btnFloorDown')?.addEventListener('click', () => changeFloor(-1));
@@ -218,7 +221,7 @@ function setupEventListeners() {
 }
 
 // ==========================================
-// 4. LÓGICA CORE (Mapas e Interações)
+// 4. LÓGICA CORE (Matemática e Interação)
 // ==========================================
 function createEmptyMap() {
     const newMap = [];
@@ -278,7 +281,7 @@ function handleMouseMove(e) {
     ctx.restore();
 
     if (isDragging) {
-        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode?.erase && dragStartNode?.type === 'floor')) {
+        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -294,6 +297,7 @@ function handleMouseDown(e) {
     updateUI();
     saveState(); 
 
+    // Ferramenta de Preenchimento (Balde de Tinta com Shift)
     if (e.shiftKey && (currentBrush === 1 || currentBrush === 7)) {
         if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
@@ -337,7 +341,6 @@ function handleMouseDown(e) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-        // Garantia Anti-Crash: Se a quina for inválida, ele assume 'L'
         if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
         else dragStartNode = { type: 'wall', row: hoverRow, col: hoverCol, side: 'L', erase: isErasing };
         
@@ -353,12 +356,9 @@ function handleMouseDown(e) {
 
 function handleMouseUp() {
     if (isDragging) {
-        // Blindagem contra crashes de nódulos nulos
         const eraseMode = dragStartNode?.erase || false; 
-        
         if (currentBrush === 2 || currentBrush === 3) {
             if (!eraseMode) {
-                saveState(); 
                 previewWalls.forEach(p => {
                     if(map[p.row] && map[p.row][p.col]) {
                         map[p.row][p.col]['wall' + p.side] = blockHeight;
@@ -366,7 +366,6 @@ function handleMouseUp() {
                     }
                 });
             } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
-                saveState();
                 previewWalls.forEach(p => {
                     if(map[p.row] && map[p.row][p.col]) {
                         map[p.row][p.col]['wall' + p.side] = 0;
@@ -408,6 +407,7 @@ function drawFlatWall(p1, p2, height, baseColor, z1 = 0, z2 = 0, texPattern = nu
     ctx.fillStyle = baseColor;
     ctx.fill();
 
+    // Aplica a textura da parede com Sombreamento Direcional!
     if (texPattern && patterns[texPattern]) {
         ctx.save();
         ctx.fillStyle = patterns[texPattern];
@@ -576,7 +576,6 @@ function updatePreview() {
     previewWalls = [];
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
-    // Acesso Blindado: Nunca assume que dragStartNode existe livremente
     const currentEraseMode = (isDragging && dragStartNode) ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
@@ -681,6 +680,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             let fTex = targetMap[row][col].floorTex;
             
+            // Distorce a Textura do Chão para a Perspectiva Isométrica Perfeita!
             if (fTex && patterns[fTex] && !isGhost && !activeEraseMode) {
                 ctx.save();
                 ctx.clip(); 
@@ -757,7 +757,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (targetMap[row][col].column === 1) {
             let colH = applyCutaway ? cutawayHeight : blockHeight;
             const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
-            
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
@@ -899,7 +898,10 @@ function drawIsometricGrid() {
     ctx.scale(cameraZoom, cameraZoom);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
-    const currentEraseMode = isDragging ? (dragStartNode?.erase || false) : isErasing;
+    
+    // Garantia Anti-Crash para o modo de Arrastar/Apagar
+    let currentEraseMode = isErasing;
+    if (isDragging && dragStartNode) currentEraseMode = dragStartNode.erase;
 
     let renderQueue = [];
     for (const f of floors) {
@@ -928,14 +930,14 @@ function drawIsometricGrid() {
     ctx.restore();
 }
 
+// A FUNÇÃO CORAÇÃO (Limpa e Blindada)
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     
-    // Blindagem final
-    const currentEraseMode = (isDragging && dragStartNode) ? dragStartNode.erase : isErasing;
+    let currentEraseMode = isErasing;
+    if (isDragging && dragStartNode) currentEraseMode = dragStartNode.erase;
 
-    if (!isCutaway) return; 
-
+    // Pintar Chão (7)
     if (currentBrush === 7) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         if (!currentEraseMode) {
@@ -947,6 +949,7 @@ function applySmartBrush() {
         return;
     }
     
+    // Pintar Parede (8)
     if (currentBrush === 8) {
         let edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) {
@@ -962,6 +965,7 @@ function applySmartBrush() {
         return;
     }
 
+    // Piso (1)
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         if (!currentEraseMode) {
@@ -973,6 +977,7 @@ function applySmartBrush() {
         return; 
     }
     
+    // Coluna (6)
     if (currentBrush === 6) {
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         map[hoverRow][hoverCol].column = currentEraseMode ? 0 : 1;
@@ -984,6 +989,7 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
+    // Parede Simples (2) - Arrastando
     if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
         if (!currentEraseMode && !isWallSupported(tRow, tCol, side)) return;
 
