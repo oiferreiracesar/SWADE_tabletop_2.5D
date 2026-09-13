@@ -144,7 +144,9 @@ function getRoofZ(fIndex, x, y, pitch) {
         for (let c = -2; c <= 11; c++) {
             let isEnclosedCell = false;
             if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`] || mapData[fIndex][r][c].floor > 0;
+                // Ter piso nao implica estar fechado: uma laje ou um patio a ceu aberto
+                // tem chao e nao tem telhado. So o cômodo fechado conta.
+                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
             }
             if (!isEnclosedCell) {
                 let dx = 0;
@@ -261,30 +263,45 @@ function updatePreview() {
     if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
         if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
             const start = dragStartNode;
-            const dR = hoverRow - start.row;
-            const dC = hoverCol - start.col;
+
+            // Comparamos CELULA com CELULA. Antes media-se a celula do mouse contra a
+            // coordenada da ARESTA (que pode ser celula+1), o que criava um deslocamento
+            // fantasma de 1: comecando pelos quadrantes de baixo ou da direita, a previa
+            // ja nascia com duas paredes sem o mouse ter saido do lugar.
+            const dR = hoverRow - start.cellRow;
+            const dC = hoverCol - start.cellCol;
 
             if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
                 const steps = Math.abs(dR);
                 const rDir = dR > 0 ? 1 : -1;
                 const cDir = dC > 0 ? 1 : -1;
                 for (let i = 0; i <= steps; i++) {
-                    const r = start.row + (i * rDir);
-                    const c = start.col + (i * cDir);
+                    const r = start.cellRow + (i * rDir);
+                    const c = start.cellCol + (i * cDir);
                     if (r >= 0 && r < 10 && c >= 0 && c < 10) {
                         if (rDir === cDir) previewWalls.push({ row: r, col: c, side: 'NS' });
                         else previewWalls.push({ row: r, col: c, side: 'WE' });
                     }
                 }
-            } 
+            }
+            // Mouse parado: vale exatamente a aresta que voce clicou, sem reinterpretacao.
+            else if (dR === 0 && dC === 0) {
+                previewWalls.push({ row: start.row, col: start.col, side: start.side });
+            }
+            // Traco reto: a DIRECAO do arrasto escolhe o eixo, e o QUADRANTE clicado
+            // escolhe qual das duas linhas paralelas do grid recebe a parede.
             else if (Math.abs(dR) >= Math.abs(dC)) {
-                const minR = Math.min(start.row, hoverRow);
-                const maxR = Math.max(start.row, hoverRow);
-                for (let r = minR; r <= maxR; r++) if (r < 10) previewWalls.push({ row: r, col: start.col, side: 'L' });
+                const col = (start.quad === 'NE' || start.quad === 'SE') ? start.cellCol + 1 : start.cellCol;
+                const minR = Math.min(start.cellRow, hoverRow);
+                const maxR = Math.max(start.cellRow, hoverRow);
+                for (let r = minR; r <= maxR; r++)
+                    if (r >= 0 && r < 10 && col >= 0 && col < 10) previewWalls.push({ row: r, col: col, side: 'L' });
             } else {
-                const minC = Math.min(start.col, hoverCol);
-                const maxC = Math.max(start.col, hoverCol);
-                for (let c = minC; c <= maxC; c++) if (c < 10) previewWalls.push({ row: start.row, col: c, side: 'R' });
+                const row = (start.quad === 'SW' || start.quad === 'SE') ? start.cellRow + 1 : start.cellRow;
+                const minC = Math.min(start.cellCol, hoverCol);
+                const maxC = Math.max(start.cellCol, hoverCol);
+                for (let c = minC; c <= maxC; c++)
+                    if (c >= 0 && c < 10 && row >= 0 && row < 10) previewWalls.push({ row: row, col: c, side: 'R' });
             }
         } else if (!isDragging) {
             const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
@@ -402,7 +419,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             hideLowerRoof = true;
         }
 
-        let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
+        let isIndoors = enclosedCache[`${fIndex},${row},${col}`];
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
             
@@ -450,7 +467,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             let neighborHasRoof = (r, c) => {
                 if (r < 0 || r >= 10 || c < 0 || c >= 10) return false;
-                let ind = enclosedCache[`${fIndex},${r},${c}`] || mapData[fIndex][r][c].floor > 0;
+                let ind = enclosedCache[`${fIndex},${r},${c}`];
                 return ind && !hasStructureAbove(fIndex, r, c);
             };
 
@@ -742,11 +759,12 @@ canvas.addEventListener('mousedown', (e) => {
 
         while(queue.length > 0) {
             const {r, c} = queue.shift();
-            const oldFloor = map[r][c].floor;
             map[r][c].floor = isErasing ? 0 : 1;
-            
-            if (!isErasing && oldFloor === 0) continue;
-            
+
+            // A propagacao e limitada pelas PAREDES (testadas logo abaixo), nunca pelo
+            // estado do piso. A trava antiga interrompia o preenchimento em toda celula
+            // vazia -- ou seja, sempre -- e so um ladrilho era pintado.
+
             const wL = map[r][c].wallL > 0; const wR = map[r][c].wallR > 0;
             const wWE = map[r][c].wallWE > 0; const wNS = map[r][c].wallNS > 0;
             const wL_next = c < 9 && map[r][c+1].wallL > 0;
@@ -770,7 +788,8 @@ canvas.addEventListener('mousedown', (e) => {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
+        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side,
+                                   cellRow: hoverRow, cellCol: hoverCol, quad: hoverQuadrant, erase: isErasing };
         else if (isErasing) {
             dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
             applySmartBrush();

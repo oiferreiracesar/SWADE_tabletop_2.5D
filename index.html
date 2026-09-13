@@ -1,6 +1,4 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
+<html lang="pt-BR"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Engine Isométrica 2.5D - Construtor</title>
@@ -109,14 +107,41 @@
             <label for="sliderAltura">Altura das Paredes: <strong id="valorAltura">48</strong></label>
             <input type="range" id="sliderAltura" min="12" max="96" value="48">
         </div>
+        <div class="slider-group">
+            <label for="roofPitchSelect">Inclinação do Telhado</label>
+            <select id="roofPitchSelect">
+                <option value="6">Baixo (Estilo Moderno)</option>
+                <option value="12">Médio (Padrão)</option>
+                <option value="24" selected="">Alto (Clássico)</option>
+            </select>
+        </div>
+
+        <h2>Materiais</h2>
+        <div class="color-picker">
+            <span>Grama / Chão:</span>
+            <input type="color" id="colorSurface" value="#1e293b">
+        </div>
+        <div class="color-picker">
+            <span>Terra (Vazio):</span>
+            <input type="color" id="colorDirt" value="#1e140f">
+        </div>
+        <div class="color-picker">
+            <span>Chão Subsolo:</span>
+            <input type="color" id="colorUnderground" value="#0a0705">
+        </div>
+        <div class="color-picker">
+            <span>Telhado:</span>
+            <input type="color" id="colorRoof" value="#475569">
+        </div>
 
     </div>
 
     <!-- O CONTAINER SEGURO -->
     <div id="canvas-container">
-        <canvas id="gameCanvas"></canvas>
+        <canvas id="gameCanvas" width="1392" height="901"></canvas>
     </div>
 
     <script src="script.js"></script>
+
 </body>
 </html>
