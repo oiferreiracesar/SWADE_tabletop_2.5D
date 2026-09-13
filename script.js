@@ -2,6 +2,60 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const container = document.getElementById('canvas-container');
 
+// ==========================================
+// 🎨 GERENCIADOR DE TEXTURAS (SEU GITHUB)
+// ==========================================
+// Cole aqui as URLs diretas (Raw) das imagens hospedadas no seu GitHub.
+const textureURLs = {
+    'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
+    'grama': 'https://www.transparenttextures.com/patterns/grass.png',
+    'madeira': 'https://www.transparenttextures.com/patterns/wood-pattern.png',
+    'azulejo': 'https://www.transparenttextures.com/patterns/square-bg.png',
+    'telha': 'https://www.transparenttextures.com/patterns/dark-matter.png'
+};
+
+const patterns = {};
+let currentTexture = 'madeira';
+
+// Pre-carrega todas as texturas antes de rodar perfeitamente
+Object.keys(textureURLs).forEach(key => {
+    let img = new Image();
+    img.src = textureURLs[key];
+    img.onload = () => {
+        patterns[key] = ctx.createPattern(img, 'repeat');
+        drawIsometricGrid(); // Atualiza a tela assim que a imagem baixar
+    };
+});
+
+// Inicializa a UI das Texturas
+const texturePalette = document.getElementById('texturePalette');
+Object.keys(textureURLs).forEach(key => {
+    let wrapper = document.createElement('div');
+    wrapper.className = 'texture-wrapper';
+    
+    let btn = document.createElement('div');
+    btn.className = 'texture-btn ' + (key === currentTexture ? 'selected' : '');
+    btn.style.backgroundImage = `url(${textureURLs[key]})`;
+    btn.onclick = () => {
+        currentTexture = key;
+        document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        if(currentBrush !== 7 && currentBrush !== 8) {
+            currentBrush = 7; // Auto-seleciona a pintura de chão se não estiver com pincel
+            updateUI();
+        }
+    };
+
+    let label = document.createElement('div');
+    label.className = 'texture-label';
+    label.innerText = key.toUpperCase();
+
+    wrapper.appendChild(btn);
+    wrapper.appendChild(label);
+    texturePalette.appendChild(wrapper);
+});
+// ==========================================
+
 const tileWidth = 64;
 const tileHeight = 32;
 
@@ -37,12 +91,20 @@ let map;
 
 let enclosedCache = {};
 
+// NOVA FUNÇÃO: O Mapa agora memoriza as texturas!
 function createEmptyMap() {
     const newMap = [];
     for (let i = 0; i < 10; i++) {
         newMap[i] = [];
         for (let j = 0; j < 10; j++) {
-            newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0 }; 
+            newMap[i][j] = { 
+                floor: 0, floorTex: null,
+                wallL: 0, wallLTex: null,
+                wallR: 0, wallRTex: null,
+                wallWE: 0, wallWETex: null,
+                wallNS: 0, wallNSTex: null,
+                column: 0 
+            }; 
         }
     }
     return newMap;
@@ -68,25 +130,33 @@ function gridToScreen(row, col) {
     return { x, y };
 }
 
-function defineTilePath(pNorte, pLeste, pSul, pOeste) {
-    ctx.beginPath();
-    ctx.moveTo(pNorte.x, pNorte.y);
-    ctx.lineTo(pLeste.x, pLeste.y);
-    ctx.lineTo(pSul.x, pSul.y);
-    ctx.lineTo(pOeste.x, pOeste.y);
-    ctx.closePath();
-}
-
-// A SOLUÇÃO: A parede agora aceita z1 e z2 para inclinar a sua base e repousar sobre o telhado!
-function drawFlatWall(p1, p2, height, color, z1 = 0, z2 = 0) {
+// O NOVO RENDERIZADOR DE PAREDES (Com suporte à texturas e Sombras 3D mantidas!)
+function drawFlatWall(p1, p2, height, baseColor, z1 = 0, z2 = 0, texPattern = null) {
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y - z1); 
     ctx.lineTo(p2.x, p2.y - z2); 
     ctx.lineTo(p2.x, p2.y - height); 
     ctx.lineTo(p1.x, p1.y - height); 
     ctx.closePath();
-    ctx.fillStyle = color;
+    
+    ctx.fillStyle = baseColor;
     ctx.fill();
+
+    if (texPattern && patterns[texPattern]) {
+        ctx.save();
+        ctx.fillStyle = patterns[texPattern];
+        ctx.fill();
+        ctx.restore();
+
+        // Camada de Sombra Direcional 3D por Cima da Textura!
+        let overlay = baseColor === '#b71c1c' ? 'rgba(0,0,0,0.5)' : 
+                      baseColor === '#e53935' ? 'rgba(0,0,0,0.1)' : 
+                      baseColor === '#d32f2f' ? 'rgba(0,0,0,0.4)' : 
+                      'rgba(0,0,0,0.2)';
+        ctx.fillStyle = overlay;
+        ctx.fill();
+    }
+
     ctx.strokeStyle = '#222'; 
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -103,9 +173,7 @@ function isEnclosed(fIndex, startRow, startCol) {
     while (queue.length > 0) {
         const {r, c} = queue.shift();
 
-        if (fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0) {
-            continue;
-        }
+        if (fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0) continue;
 
         if (fMap[r][c].wallL === 0) {
             if (c === 0) return false; 
@@ -149,13 +217,9 @@ function getRoofZ(fIndex, x, y, pitch) {
             }
             if (!isEnclosedCell) {
                 let dx = 0;
-                if (x < r) dx = r - x;
-                else if (x > r + 1) dx = x - (r + 1);
-                
+                if (x < r) dx = r - x; else if (x > r + 1) dx = x - (r + 1);
                 let dy = 0;
-                if (y < c) dy = c - y;
-                else if (y > c + 1) dy = y - (c + 1);
-                
+                if (y < c) dy = c - y; else if (y > c + 1) dy = y - (c + 1);
                 let dist = Math.max(dx, dy);
                 if (dist < minDist) minDist = dist;
             }
@@ -167,13 +231,10 @@ function getRoofZ(fIndex, x, y, pitch) {
 function getTriangleShade(p1, p2, p3) {
     let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
     if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
-
     let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
     let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
 
-    let eps = 0.01;
-    let nx = -a; 
-    let ny = -b;
+    let eps = 0.01; let nx = -a; let ny = -b;
 
     if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; 
     if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; 
@@ -220,11 +281,8 @@ function isWallSupported(r, c, side) {
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
-    
-    // A sua sacada de mestre: Avalia apenas se há piso, nunca a parede fina ao redor!
     if (upper[r][c].floor > 0) return true;
     if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true;
-    
     return false;
 }
 
@@ -233,9 +291,7 @@ function isFloorEmpty(fIndex) {
     if (!fMap) return true;
     for(let r=0; r<10; r++) {
         for(let c=0; c<10; c++) {
-            if (fMap[r][c].floor > 0 || fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0 || fMap[r][c].wallL > 0 || fMap[r][c].wallR > 0 || fMap[r][c].column > 0) {
-                return false;
-            }
+            if (fMap[r][c].floor > 0 || fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0 || fMap[r][c].wallL > 0 || fMap[r][c].wallR > 0 || fMap[r][c].column > 0) return false;
         }
     }
     return true;
@@ -342,32 +398,52 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
         let isDirt = false;
         if (fIndex <= 0) {
-            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
-                isDirt = true;
-            }
+            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
         }
 
+        // O NOVO RENDERIZADOR DE CHÃO (Com Suporte à Transformação Isométrica de Texturas!)
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
             ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath(); ctx.fill();
         } else if (targetMap[row][col].floor > 0) {
-            ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.fill(); 
+            ctx.beginPath(); 
+            ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+            ctx.closePath(); 
+
+            let fTex = targetMap[row][col].floorTex;
+            
+            if (fTex && patterns[fTex] && !isGhost && !activeEraseMode) {
+                ctx.save();
+                ctx.clip(); // Restringe a textura apenas dentro do losango do chão
+                ctx.translate(pNorte.x, pNorte.y); // Move a âncora para o topo do losango
+                ctx.scale(1, 0.5); // Amassa a textura na vertical (Projeção Isométrica)
+                ctx.rotate(45 * Math.PI / 180); // Rotaciona a textura em 45º
+                ctx.fillStyle = patterns[fTex];
+                // Desenha a textura grande o suficiente para cobrir todo o tile deformado
+                ctx.fillRect(0, 0, tileWidth, tileWidth);
+                ctx.restore();
+            } else {
+                ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
+                ctx.fill(); 
+            }
         }
         
+        // Desenha a linha de Grade fina sobre as texturas
         if (shouldDrawGrid) {
             ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
+            ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : 'rgba(0,0,0,0.2)'); ctx.stroke();
         }
 
-        if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
+        // Preview da Ferramenta ativa
+        if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging) {
             const supp = isFloorSupported(row, col);
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
-            ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
-            ctx.fill();
+            if (currentBrush === 1 || currentBrush === 7) {
+                ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
+                ctx.closePath();
+                ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.4)');
+                ctx.fill();
+            }
         }
 
         let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
@@ -375,40 +451,46 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
         let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
 
-        // O CORTE DE BASE: Calcula a inclinação do telhado inferior para que a parede descanse sobre ele
         let zL_W = 0, zL_N = 0, zR_N = 0, zR_E = 0, zWE_W = 0, zWE_E = 0, zNS_N = 0, zNS_S = 0;
         
         if (fIndex > 0) {
-            let fB = fIndex - 1; // Floor Below (Andar de baixo)
+            let fB = fIndex - 1; 
             let checkR = (r, c) => {
                 if (r < 0 || r >= 10 || c < 0 || c >= 10) return false;
                 let ind = enclosedCache[`${fB},${r},${c}`] || mapData[fB][r][c].floor > 0;
                 return ind && !hasStructureAbove(fB, r, c);
             };
             
-            if (hL > 0 && (checkR(row, col) || checkR(row, col-1))) {
-                zL_W = Math.min(hL, getRoofZ(fB, row+1, col, roofPitch));
-                zL_N = Math.min(hL, getRoofZ(fB, row, col, roofPitch));
-            }
-            if (hR > 0 && (checkR(row, col) || checkR(row-1, col))) {
-                zR_N = Math.min(hR, getRoofZ(fB, row, col, roofPitch));
-                zR_E = Math.min(hR, getRoofZ(fB, row, col+1, roofPitch));
-            }
-            if (hWE > 0 && checkR(row, col)) {
-                zWE_W = Math.min(hWE, getRoofZ(fB, row+1, col, roofPitch));
-                zWE_E = Math.min(hWE, getRoofZ(fB, row, col+1, roofPitch));
-            }
-            if (hNS > 0 && checkR(row, col)) {
-                zNS_N = Math.min(hNS, getRoofZ(fB, row, col, roofPitch));
-                zNS_S = Math.min(hNS, getRoofZ(fB, row+1, col+1, roofPitch));
-            }
+            if (hL > 0 && (checkR(row, col) || checkR(row, col-1))) { zL_W = Math.min(hL, getRoofZ(fB, row+1, col, roofPitch)); zL_N = Math.min(hL, getRoofZ(fB, row, col, roofPitch)); }
+            if (hR > 0 && (checkR(row, col) || checkR(row-1, col))) { zR_N = Math.min(hR, getRoofZ(fB, row, col, roofPitch)); zR_E = Math.min(hR, getRoofZ(fB, row, col+1, roofPitch)); }
+            if (hWE > 0 && checkR(row, col)) { zWE_W = Math.min(hWE, getRoofZ(fB, row+1, col, roofPitch)); zWE_E = Math.min(hWE, getRoofZ(fB, row, col+1, roofPitch)); }
+            if (hNS > 0 && checkR(row, col)) { zNS_N = Math.min(hNS, getRoofZ(fB, row, col, roofPitch)); zNS_S = Math.min(hNS, getRoofZ(fB, row+1, col+1, roofPitch)); }
         }
 
-        // As paredes agora recebem Z1 e Z2 e são moldadas perfeitamente para repousar no telhado!
-        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c', zL_W, zL_N); 
-        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935', zR_N, zR_E); 
-        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f', zWE_W, zWE_E); 
-        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828', zNS_N, zNS_S); 
+        // Enviando as texturas memorizadas para as paredes
+        let texL = isGhost || activeEraseMode ? null : targetMap[row][col].wallLTex;
+        let texR = isGhost || activeEraseMode ? null : targetMap[row][col].wallRTex;
+        let texWE = isGhost || activeEraseMode ? null : targetMap[row][col].wallWETex;
+        let texNS = isGhost || activeEraseMode ? null : targetMap[row][col].wallNSTex;
+
+        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c', zL_W, zL_N, texL); 
+        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935', zR_N, zR_E, texR); 
+        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f', zWE_W, zWE_E, texWE); 
+        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828', zNS_N, zNS_S, texNS); 
+
+        // Ferramenta ativa na parede
+        if (showActiveTools && currentBrush === 8 && row === hoverRow && col === hoverCol && !isDragging) {
+            let edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
+            if(edge && map[edge.row][edge.col]['wall' + edge.side] > 0) {
+                // Desenha a sombra vermelha no hover da pintura
+                let pA, pB;
+                if(edge.side === 'L') { pA = gridToScreen(edge.row+1, edge.col); pB = gridToScreen(edge.row, edge.col); }
+                if(edge.side === 'R') { pA = gridToScreen(edge.row, edge.col); pB = gridToScreen(edge.row, edge.col+1); }
+                if(edge.side === 'WE') { pA = gridToScreen(edge.row+1, edge.col); pB = gridToScreen(edge.row, edge.col+1); }
+                if(edge.side === 'NS') { pA = gridToScreen(edge.row, edge.col); pB = gridToScreen(edge.row+1, edge.col+1); }
+                drawFlatWall(pA, pB, blockHeight, 'rgba(255, 255, 0, 0.4)');
+            }
+        }
 
         if (targetMap[row][col].column === 1) {
             let colH = applyCutaway ? cutawayHeight : blockHeight;
@@ -416,10 +498,8 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
-            
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
             ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
-            
             ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
         }
@@ -466,16 +546,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             let pC_3d = {x: row + 0.5, y: col + 0.5, z: zC};
 
             ctx.save();
-            
-            ctx.beginPath();
-            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
-            ctx.closePath();
-            ctx.clip();
+            ctx.beginPath(); ctx.moveTo(pSul.x, pSul.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight); ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); ctx.lineTo(pOeste.x, pOeste.y - blockHeight); ctx.closePath(); ctx.clip();
 
             let neighborHasRoof = (r, c) => {
                 if (r < 0 || r >= 10 || c < 0 || c >= 10) return false;
@@ -485,40 +556,20 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             const drawSkirt = (p1_2d, p2_2d, p1_3d, p2_3d, overlay) => {
                 if (p1_3d.z <= 0.1 && p2_3d.z <= 0.1) return;
-                
                 ctx.fillStyle = roofColor;
-                ctx.beginPath();
-                ctx.moveTo(p1_2d.x, p1_2d.y); 
-                ctx.lineTo(p2_2d.x, p2_2d.y); 
-                ctx.lineTo(p2_2d.x, p2_2d.y + p2_3d.z);
-                ctx.lineTo(p1_2d.x, p1_2d.y + p1_3d.z);
-                ctx.closePath();
+                ctx.beginPath(); ctx.moveTo(p1_2d.x, p1_2d.y); ctx.lineTo(p2_2d.x, p2_2d.y); ctx.lineTo(p2_2d.x, p2_2d.y + p2_3d.z); ctx.lineTo(p1_2d.x, p1_2d.y + p1_3d.z); ctx.closePath();
                 ctx.fill();
-                
-                ctx.fillStyle = overlay;
-                ctx.fill();
-                
-                ctx.strokeStyle = roofColor;
-                ctx.lineWidth = 1;
-                ctx.stroke();
+
+                if (patterns['telha']) { ctx.fillStyle = patterns['telha']; ctx.fill(); }
+
+                ctx.fillStyle = overlay; ctx.fill();
+                ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
             };
 
-            if (!neighborHasRoof(row - 1, col)) { 
-                drawSkirt(t_pN, t_pNE, pN_3d, pNE_3d, 'rgba(0,0,0,0.1)');
-                drawSkirt(t_pNE, t_pE, pNE_3d, pE_3d, 'rgba(0,0,0,0.1)');
-            }
-            if (!neighborHasRoof(row, col + 1)) { 
-                drawSkirt(t_pE, t_pSE, pE_3d, pSE_3d, 'rgba(0,0,0,0.4)');
-                drawSkirt(t_pSE, t_pS, pSE_3d, pS_3d, 'rgba(0,0,0,0.4)');
-            }
-            if (!neighborHasRoof(row + 1, col)) { 
-                drawSkirt(t_pS, t_pSW, pS_3d, pSW_3d, 'rgba(255,255,255,0.15)');
-                drawSkirt(t_pSW, t_pW, pSW_3d, pW_3d, 'rgba(255,255,255,0.15)');
-            }
-            if (!neighborHasRoof(row, col - 1)) { 
-                drawSkirt(t_pW, t_pNW, pW_3d, pNW_3d, 'rgba(0,0,0,0.3)');
-                drawSkirt(t_pNW, t_pN, pNW_3d, pN_3d, 'rgba(0,0,0,0.3)');
-            }
+            if (!neighborHasRoof(row - 1, col)) { drawSkirt(t_pN, t_pNE, pN_3d, pNE_3d, 'rgba(0,0,0,0.1)'); drawSkirt(t_pNE, t_pE, pNE_3d, pE_3d, 'rgba(0,0,0,0.1)'); }
+            if (!neighborHasRoof(row, col + 1)) { drawSkirt(t_pE, t_pSE, pE_3d, pSE_3d, 'rgba(0,0,0,0.4)'); drawSkirt(t_pSE, t_pS, pSE_3d, pS_3d, 'rgba(0,0,0,0.4)'); }
+            if (!neighborHasRoof(row + 1, col)) { drawSkirt(t_pS, t_pSW, pS_3d, pSW_3d, 'rgba(255,255,255,0.15)'); drawSkirt(t_pSW, t_pW, pSW_3d, pW_3d, 'rgba(255,255,255,0.15)'); }
+            if (!neighborHasRoof(row, col - 1)) { drawSkirt(t_pW, t_pNW, pW_3d, pNW_3d, 'rgba(0,0,0,0.3)'); drawSkirt(t_pNW, t_pN, pNW_3d, pN_3d, 'rgba(0,0,0,0.3)'); }
 
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
@@ -526,10 +577,15 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
                 ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
                 ctx.fillStyle = roofColor; ctx.fill();
-                ctx.fillStyle = overlay; ctx.fill();
                 
+                // O Telhado agora puxa a textura 'telha' da sua biblioteca automaticamente!
+                if (patterns['telha']) {
+                    ctx.fillStyle = patterns['telha'];
+                    ctx.fill();
+                }
+
+                ctx.fillStyle = overlay; ctx.fill();
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
-                ctx.strokeStyle = overlay; ctx.lineWidth = 1; ctx.stroke();
             };
 
             drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
@@ -549,7 +605,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         const supp = isFloorSupported(row, col);
         let colH = applyCutaway ? cutawayHeight : blockHeight;
         const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
-        
         let ghostColor = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.4)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)'); 
         ctx.fillStyle = ghostColor;
         ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill();
@@ -621,6 +676,22 @@ function applySmartBrush() {
 
     if (!isCutaway) return; 
 
+    // NOVO: Pintura Inteligente de Chão e Parede
+    if (currentBrush === 7) { 
+        if (map[hoverRow][hoverCol].floor > 0) {
+            map[hoverRow][hoverCol].floorTex = currentEraseMode ? null : currentTexture;
+        }
+        return;
+    }
+    
+    if (currentBrush === 8) {
+        let edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
+        if (edge && map[edge.row][edge.col]['wall' + edge.side] > 0) {
+            map[edge.row][edge.col]['wall' + edge.side + 'Tex'] = currentEraseMode ? null : currentTexture;
+        }
+        return;
+    }
+
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : 1; 
@@ -676,6 +747,11 @@ function updateUI() {
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnColuna').classList.toggle('active', currentBrush === 6 && !isErasing);
+    
+    // UI das novas ferramentas de pintura
+    document.getElementById('btnPaintFloor').classList.toggle('active', currentBrush === 7 && !isErasing);
+    document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
+
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
@@ -747,7 +823,7 @@ canvas.addEventListener('mousemove', (e) => {
     ctx.restore();
 
     if (isDragging) {
-        if (currentBrush === 1 || currentBrush === 6 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -764,27 +840,30 @@ canvas.addEventListener('mousedown', (e) => {
     saveState(); 
 
     if (e.shiftKey) {
-        if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
-        const queue = [{r: hoverRow, c: hoverCol}];
-        const visited = new Set();
-        visited.add(`${hoverRow},${hoverCol}`);
+        // Flood Fill para construção
+        if (currentBrush === 1) {
+            if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
+            const queue = [{r: hoverRow, c: hoverCol}];
+            const visited = new Set();
+            visited.add(`${hoverRow},${hoverCol}`);
 
-        while(queue.length > 0) {
-            const {r, c} = queue.shift();
-            const oldFloor = map[r][c].floor;
-            map[r][c].floor = isErasing ? 0 : 1;
-            
-            if (!isErasing && oldFloor === 0) continue;
-            
-            const wL = map[r][c].wallL > 0; const wR = map[r][c].wallR > 0;
-            const wWE = map[r][c].wallWE > 0; const wNS = map[r][c].wallNS > 0;
-            const wL_next = c < 9 && map[r][c+1].wallL > 0;
-            const wR_next = r < 9 && map[r+1][c].wallR > 0;
+            while(queue.length > 0) {
+                const {r, c} = queue.shift();
+                const oldFloor = map[r][c].floor;
+                map[r][c].floor = isErasing ? 0 : 1;
+                
+                if (!isErasing && oldFloor === 0) continue;
+                
+                const wL = map[r][c].wallL > 0; const wR = map[r][c].wallR > 0;
+                const wWE = map[r][c].wallWE > 0; const wNS = map[r][c].wallNS > 0;
+                const wL_next = c < 9 && map[r][c+1].wallL > 0;
+                const wR_next = r < 9 && map[r+1][c].wallR > 0;
 
-            if (c > 0 && !wL && !wWE && !wNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
-            if (c < 9 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
-            if (r > 0 && !wR && !wWE && !wNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
-            if (r < 9 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+                if (c > 0 && !wL && !wWE && !wNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
+                if (c < 9 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
+                if (r > 0 && !wR && !wWE && !wNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
+                if (r < 9 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+            }
         }
         drawIsometricGrid();
         return; 
@@ -792,8 +871,8 @@ canvas.addEventListener('mousedown', (e) => {
 
     isDragging = true; 
     
-    if (currentBrush === 1 || currentBrush === 6) {
-        dragStartNode = { type: currentBrush === 1 ? 'floor' : 'column', row: hoverRow, col: hoverCol, erase: isErasing };
+    if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
+        dragStartNode = { type: currentBrush === 1 ? 'floor' : 'paint', row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
     } else if (currentBrush === 3) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
@@ -886,7 +965,7 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2','3','6'].includes(e.key)) {
+    if (['1','2','3','6','7','8'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
@@ -912,6 +991,10 @@ document.getElementById('btnPiso').addEventListener('click', () => { currentBrus
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
+
+// Botões das novas ferramentas
+document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); });
+document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); });
 
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
