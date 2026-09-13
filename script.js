@@ -6,7 +6,7 @@ let canvas, ctx, container, texturePalette;
 const tileWidth = 64;
 const tileHeight = 32;
 
-// Câmera e Responsividade
+// Câmera
 let cameraX = 0;
 let cameraY = 0;
 let cameraZoom = 1.0; 
@@ -36,7 +36,10 @@ let map;
 let mapHistory = [];
 let enclosedCache = {};
 
-// Texturas (Puxando do GitHub / Externo)
+// ==========================================
+// 2. GERENCIADOR DE TEXTURAS (SEU GITHUB)
+// ==========================================
+// Quando quiser adicionar suas texturas, basta colar a URL RAW do GitHub aqui embaixo
 const textureURLs = {
     'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
     'grama': 'https://www.transparenttextures.com/patterns/grass.png',
@@ -48,7 +51,7 @@ const patterns = {};
 let currentTexture = 'madeira';
 
 // ==========================================
-// 2. INICIALIZAÇÃO SEGURA (Prevenção de Crash)
+// 3. INICIALIZAÇÃO SEGURA E GAME LOOP
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('gameCanvas');
@@ -59,7 +62,7 @@ window.addEventListener('DOMContentLoaded', () => {
     mapData[0] = createEmptyMap();
     map = mapData[0];
 
-    // Constrói a UI de Texturas
+    // Constrói UI de Texturas
     if (texturePalette) {
         Object.keys(textureURLs).forEach(key => {
             let wrapper = document.createElement('div');
@@ -88,7 +91,7 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Carrega as imagens com segurança
+    // Carrega Texturas
     Object.keys(textureURLs).forEach(key => {
         let img = new Image();
         img.crossOrigin = "Anonymous";
@@ -105,9 +108,21 @@ window.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(gameLoop);
 });
 
-// ==========================================
-// 3. GAME LOOP DA CÂMERA E CONTROLES
-// ==========================================
+// A Função Blindada de Resolução
+function resizeCanvas() {
+    if (!canvas) return;
+    // Pega a largura do container, se não existir, subtrai o painel da largura total da janela
+    let w = container ? container.clientWidth : window.innerWidth - 280;
+    let h = container ? container.clientHeight : window.innerHeight;
+    
+    canvas.width = w;
+    canvas.height = h;
+    
+    originX = canvas.width / 2;
+    originY = canvas.height / 4; 
+    drawIsometricGrid();
+}
+
 function gameLoop() {
     let moved = false;
     const speed = 15 / cameraZoom; 
@@ -118,17 +133,7 @@ function gameLoop() {
     if (keys['d'] || keys['arrowright']) { cameraX -= speed; moved = true; }
     
     if (moved) drawIsometricGrid();
-    
     requestAnimationFrame(gameLoop);
-}
-
-function resizeCanvas() {
-    if (!container) return;
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-    originX = canvas.width / 2;
-    originY = canvas.height / 4; 
-    drawIsometricGrid();
 }
 
 function setupEventListeners() {
@@ -211,7 +216,7 @@ function setupEventListeners() {
 }
 
 // ==========================================
-// 4. LÓGICA CORE (Mapas e Interações)
+// 4. LOGICA CORE DO JOGO
 // ==========================================
 function createEmptyMap() {
     const newMap = [];
@@ -646,9 +651,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
 
         let isDirt = false;
-        if (fIndex <= 0) {
-            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
-        }
+        if (fIndex <= 0 && targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
 
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
@@ -749,10 +752,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     else if (renderPass === 1) {
         let hideLowerRoof = false;
-        if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
-            hideLowerRoof = true;
-        }
-
+        if (fIndex < currentFloor && isFloorEmpty(currentFloor)) hideLowerRoof = true;
         let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
