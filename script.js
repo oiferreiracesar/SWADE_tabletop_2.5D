@@ -71,7 +71,6 @@ window.addEventListener('DOMContentLoaded', () => {
             btn.className = 'texture-btn ' + (key === currentTexture ? 'selected' : '');
             btn.style.backgroundImage = `url(${textureURLs[key]})`;
             
-            // A CORREÇÃO UX VERDADEIRA: O Sequestro do Mouse foi deletado!
             btn.onclick = () => {
                 currentTexture = key;
                 document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
@@ -246,9 +245,11 @@ function handleMouseMove(e) {
 
     hoverCol = -1; hoverRow = -1; hoverQuadrant = 'none';
 
+    // A CORREÇÃO: Reverte o zoom matematicamente para testar exatamente onde o mouse está!
+    const adjX = (mouseX - originX - cameraX) / cameraZoom;
+    const adjY = (mouseY - originY - cameraY) / cameraZoom;
+
     ctx.save();
-    ctx.translate(originX + cameraX, originY + cameraY);
-    ctx.scale(cameraZoom, cameraZoom);
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             const pN = gridToScreen(row, col);
@@ -258,13 +259,12 @@ function handleMouseMove(e) {
             
             defineTilePath(pN, pE, pS, pW);
             
-            if (ctx.isPointInPath(mouseX, mouseY)) {
+            // O isPointInPath agora testa a coordenada convertida (adjX, adjY) sem sofrer com a câmera
+            if (ctx.isPointInPath(adjX, adjY)) {
                 hoverRow = row; hoverCol = col;
                 
                 const cX = (col - row) * (tileWidth / 2);
                 const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
-                const adjX = (mouseX - (originX + cameraX)) / cameraZoom;
-                const adjY = (mouseY - (originY + cameraY)) / cameraZoom;
 
                 if (adjX < cX && adjY < cY) hoverQuadrant = 'NW';
                 else if (adjX >= cX && adjY < cY) hoverQuadrant = 'NE';
@@ -292,7 +292,6 @@ function handleMouseDown(e) {
     updateUI();
     saveState(); 
 
-    // Flood Fill
     if (e.shiftKey && (currentBrush === 1 || currentBrush === 7)) {
         if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
@@ -765,6 +764,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
+            
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
             let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
