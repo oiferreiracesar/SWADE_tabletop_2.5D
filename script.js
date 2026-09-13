@@ -6,7 +6,7 @@ let canvas, ctx, container, texturePalette;
 const tileWidth = 64;
 const tileHeight = 32;
 
-// Câmera
+// Câmera e Responsividade
 let cameraX = 0;
 let cameraY = 0;
 let cameraZoom = 1.0; 
@@ -39,7 +39,6 @@ let enclosedCache = {};
 // ==========================================
 // 2. GERENCIADOR DE TEXTURAS (SEU GITHUB)
 // ==========================================
-// Quando quiser adicionar suas texturas, basta colar a URL RAW do GitHub aqui embaixo
 const textureURLs = {
     'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
     'grama': 'https://www.transparenttextures.com/patterns/grass.png',
@@ -62,7 +61,7 @@ window.addEventListener('DOMContentLoaded', () => {
     mapData[0] = createEmptyMap();
     map = mapData[0];
 
-    // Constrói UI de Texturas
+    // Constrói UI de Texturas de forma dinâmica
     if (texturePalette) {
         Object.keys(textureURLs).forEach(key => {
             let wrapper = document.createElement('div');
@@ -91,10 +90,11 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Carrega Texturas
+    // Carrega Texturas Blindado
     Object.keys(textureURLs).forEach(key => {
         let img = new Image();
         img.crossOrigin = "Anonymous";
+        img.onerror = () => console.log("Textura não carregou: " + key);
         img.src = textureURLs[key];
         img.onload = () => {
             patterns[key] = ctx.createPattern(img, 'repeat');
@@ -111,7 +111,6 @@ window.addEventListener('DOMContentLoaded', () => {
 // A Função Blindada de Resolução
 function resizeCanvas() {
     if (!canvas) return;
-    // Pega a largura do container, se não existir, subtrai o painel da largura total da janela
     let w = container ? container.clientWidth : window.innerWidth - 280;
     let h = container ? container.clientHeight : window.innerHeight;
     
@@ -153,8 +152,11 @@ function setupEventListeners() {
 
         if ((e.ctrlKey || e.metaKey) && k === 'z') {
             e.preventDefault();
-            document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
-            setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
+            const btnUndo = document.getElementById('btnUndo');
+            if (btnUndo) {
+                btnUndo.style.backgroundColor = 'rgba(255,255,255,0.2)';
+                setTimeout(() => btnUndo.style.backgroundColor = '', 150);
+            }
             if (mapHistory.length > 0) {
                 const previousState = mapHistory.pop();
                 currentFloor = previousState.floor;
@@ -186,28 +188,29 @@ function setupEventListeners() {
         drawIsometricGrid();
     }, { passive: false });
 
-    document.getElementById('btnZoomIn').addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
-    document.getElementById('btnZoomOut').addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
-    document.getElementById('btnRotL').addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
-    document.getElementById('btnRotR').addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
+    // O operador '?.addEventListener' impede o código de crashar se o botão não existir
+    document.getElementById('btnZoomIn')?.addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
+    document.getElementById('btnZoomOut')?.addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
+    document.getElementById('btnRotL')?.addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
+    document.getElementById('btnRotR')?.addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
 
-    document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
-    document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
-    document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
-    document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
-    document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
-    document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
-    document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); });
-    document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); });
-    document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
-    document.getElementById('btnUndo').addEventListener('click', () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true })); });
+    document.getElementById('btnFloorUp')?.addEventListener('click', () => changeFloor(1));
+    document.getElementById('btnFloorDown')?.addEventListener('click', () => changeFloor(-1));
+    document.getElementById('btnPiso')?.addEventListener('click', () => { currentBrush = 1; updateUI(); });
+    document.getElementById('btnParede')?.addEventListener('click', () => { currentBrush = 2; updateUI(); });
+    document.getElementById('btnRoomRect')?.addEventListener('click', () => { currentBrush = 3; updateUI(); });
+    document.getElementById('btnColuna')?.addEventListener('click', () => { currentBrush = 6; updateUI(); });
+    document.getElementById('btnPaintFloor')?.addEventListener('click', () => { currentBrush = 7; updateUI(); });
+    document.getElementById('btnPaintWall')?.addEventListener('click', () => { currentBrush = 8; updateUI(); });
+    document.getElementById('btnCutaway')?.addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
+    document.getElementById('btnUndo')?.addEventListener('click', () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true })); });
 
-    document.getElementById('sliderAltura').addEventListener('input', (e) => { blockHeight = parseInt(e.target.value); document.getElementById('valorAltura').innerText = blockHeight; drawIsometricGrid(); });
-    document.getElementById('roofPitchSelect').addEventListener('change', (e) => { roofPitch = parseInt(e.target.value); drawIsometricGrid(); });
-    document.getElementById('colorSurface').addEventListener('input', (e) => { surfaceColor = e.target.value; drawIsometricGrid(); });
-    document.getElementById('colorUnderground').addEventListener('input', (e) => { undergroundColor = e.target.value; drawIsometricGrid(); });
-    document.getElementById('colorDirt').addEventListener('input', (e) => { dirtColor = e.target.value; drawIsometricGrid(); });
-    document.getElementById('colorRoof').addEventListener('input', (e) => { roofColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('sliderAltura')?.addEventListener('input', (e) => { blockHeight = parseInt(e.target.value); document.getElementById('valorAltura').innerText = blockHeight; drawIsometricGrid(); });
+    document.getElementById('roofPitchSelect')?.addEventListener('change', (e) => { roofPitch = parseInt(e.target.value); drawIsometricGrid(); });
+    document.getElementById('colorSurface')?.addEventListener('input', (e) => { surfaceColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('colorUnderground')?.addEventListener('input', (e) => { undergroundColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('colorDirt')?.addEventListener('input', (e) => { dirtColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('colorRoof')?.addEventListener('input', (e) => { roofColor = e.target.value; drawIsometricGrid(); });
 
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
@@ -216,7 +219,7 @@ function setupEventListeners() {
 }
 
 // ==========================================
-// 4. LOGICA CORE DO JOGO
+// 4. LÓGICA CORE (Mapas e Interações)
 // ==========================================
 function createEmptyMap() {
     const newMap = [];
@@ -976,17 +979,19 @@ function changeFloor(delta) {
 }
 
 function updateUI() {
-    document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
-    document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
-    document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
-    document.getElementById('btnColuna').classList.toggle('active', currentBrush === 6 && !isErasing);
+    document.getElementById('btnPiso')?.classList.toggle('active', currentBrush === 1 && !isErasing);
+    document.getElementById('btnParede')?.classList.toggle('active', currentBrush === 2 && !isErasing);
+    document.getElementById('btnRoomRect')?.classList.toggle('active', currentBrush === 3 && !isErasing);
+    document.getElementById('btnColuna')?.classList.toggle('active', currentBrush === 6 && !isErasing);
     
-    document.getElementById('btnPaintFloor').classList.toggle('active', currentBrush === 7 && !isErasing);
-    document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
+    document.getElementById('btnPaintFloor')?.classList.toggle('active', currentBrush === 7 && !isErasing);
+    document.getElementById('btnPaintWall')?.classList.toggle('active', currentBrush === 8 && !isErasing);
 
-    document.getElementById('btnBorracha').classList.toggle('active', isErasing);
-    document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
+    document.getElementById('btnBorracha')?.classList.toggle('active', isErasing);
+    
+    const cutawayBtn = document.getElementById('btnCutaway');
+    if (cutawayBtn) cutawayBtn.innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
-    let floorName = currentFloor === 0 ? "Térreo (0)" : (currentFloor > 0 ? `Superior (${currentFloor})` : `Subsolo (${currentFloor})`);
-    document.getElementById('floorLabel').innerText = `Andar Atual: ${floorName}`;
+    const floorLabel = document.getElementById('floorLabel');
+    if (floorLabel) floorLabel.innerText = `Andar Atual: ${currentFloor === 0 ? "Térreo (0)" : (currentFloor > 0 ? `Superior (${currentFloor})` : `Subsolo (${currentFloor})`)}`;
 }
