@@ -1,74 +1,19 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const container = document.getElementById('canvas-container');
-
 // ==========================================
-// 🎥 SISTEMA DE CÂMERA (Pan e Zoom)
+// 1. VARIÁVEIS GLOBAIS E ESTADOS
 // ==========================================
-let cameraX = 0;
-let cameraY = 0;
-let cameraZoom = 0.8; // Zoom inicial mais afastado para corrigir a "aproximação"
-const ZOOM_SPEED = 0.1;
-
-let originX = 0; 
-let originY = 0;
-
-// Estado do Teclado para movimento fluido WASD
-const keys = {};
-
-// ==========================================
-// 🎨 GERENCIADOR DE TEXTURAS
-// ==========================================
-const textureURLs = {
-    'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
-    'grama': 'https://www.transparenttextures.com/patterns/grass.png',
-    'madeira': 'https://www.transparenttextures.com/patterns/wood-pattern.png',
-    'azulejo': 'https://www.transparenttextures.com/patterns/square-bg.png',
-    'telha': 'https://www.transparenttextures.com/patterns/dark-matter.png'
-};
-
-const patterns = {};
-let currentTexture = 'madeira';
-
-Object.keys(textureURLs).forEach(key => {
-    let img = new Image();
-    img.src = textureURLs[key];
-    img.onload = () => {
-        patterns[key] = ctx.createPattern(img, 'repeat');
-        drawIsometricGrid(); 
-    };
-});
-
-const texturePalette = document.getElementById('texturePalette');
-Object.keys(textureURLs).forEach(key => {
-    let wrapper = document.createElement('div');
-    wrapper.className = 'texture-wrapper';
-    
-    let btn = document.createElement('div');
-    btn.className = 'texture-btn ' + (key === currentTexture ? 'selected' : '');
-    btn.style.backgroundImage = `url(${textureURLs[key]})`;
-    btn.onclick = () => {
-        currentTexture = key;
-        document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        if(currentBrush !== 7 && currentBrush !== 8) {
-            currentBrush = 7; 
-            updateUI();
-        }
-    };
-
-    let label = document.createElement('div');
-    label.className = 'texture-label';
-    label.innerText = key.toUpperCase();
-
-    wrapper.appendChild(btn);
-    wrapper.appendChild(label);
-    texturePalette.appendChild(wrapper);
-});
-// ==========================================
+let canvas, ctx, container, texturePalette;
 
 const tileWidth = 64;
 const tileHeight = 32;
+
+// Câmera
+let cameraX = 0;
+let cameraY = 0;
+let cameraZoom = 1.0; 
+const ZOOM_SPEED = 0.1;
+let originX = 0; 
+let originY = 0;
+const keys = {}; // Estado do teclado para o WASD
 
 const levelHeight = 48; 
 let blockHeight = 48; 
@@ -78,27 +23,210 @@ let surfaceColor = '#1e293b';
 let undergroundColor = '#0a0705'; 
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
-
 let roofPitch = 24; 
 
-let hoverCol = -1;
-let hoverRow = -1;
-let hoverQuadrant = 'none';
+let hoverCol = -1, hoverRow = -1, hoverQuadrant = 'none';
 let currentBrush = 1;
-
-let isDragging = false;
-let dragStartNode = null; 
-let previewWalls = [];
-let isCutaway = true; 
-let mapHistory = [];
-let isErasing = false;
+let isDragging = false, dragStartNode = null, previewWalls = [];
+let isCutaway = true, isErasing = false;
 
 let currentFloor = 0;
 let mapData = {};
 let map; 
-
+let mapHistory = [];
 let enclosedCache = {};
 
+// Texturas
+const textureURLs = {
+    'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
+    'grama': 'https://www.transparenttextures.com/patterns/grass.png',
+    'madeira': 'https://www.transparenttextures.com/patterns/wood-pattern.png',
+    'azulejo': 'https://www.transparenttextures.com/patterns/square-bg.png',
+    'telha': 'https://www.transparenttextures.com/patterns/dark-matter.png'
+};
+const patterns = {};
+let currentTexture = 'madeira';
+
+
+// ==========================================
+// 2. INICIALIZAÇÃO SEGURA (Prevenção de Crash)
+// ==========================================
+window.addEventListener('DOMContentLoaded', () => {
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    container = document.getElementById('canvas-container');
+    texturePalette = document.getElementById('texturePalette');
+
+    // 1. Inicia o mapa primeiro!
+    mapData[0] = createEmptyMap();
+    map = mapData[0];
+
+    // 2. Constrói a UI de Texturas
+    if (texturePalette) {
+        Object.keys(textureURLs).forEach(key => {
+            let wrapper = document.createElement('div');
+            wrapper.className = 'texture-wrapper';
+            
+            let btn = document.createElement('div');
+            btn.className = 'texture-btn ' + (key === currentTexture ? 'selected' : '');
+            btn.style.backgroundImage = `url(${textureURLs[key]})`;
+            btn.onclick = () => {
+                currentTexture = key;
+                document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                if(currentBrush !== 7 && currentBrush !== 8) {
+                    currentBrush = 7; 
+                    updateUI();
+                }
+            };
+
+            let label = document.createElement('div');
+            label.className = 'texture-label';
+            label.innerText = key.toUpperCase();
+
+            wrapper.appendChild(btn);
+            wrapper.appendChild(label);
+            texturePalette.appendChild(wrapper);
+        });
+    }
+
+    // 3. Carrega as imagens com segurança (CORS ativado)
+    Object.keys(textureURLs).forEach(key => {
+        let img = new Image();
+        img.crossOrigin = "Anonymous"; // Evita bloqueios de segurança
+        img.src = textureURLs[key];
+        img.onload = () => {
+            patterns[key] = ctx.createPattern(img, 'repeat');
+            drawIsometricGrid(); 
+        };
+    });
+
+    // 4. Liga os controles
+    setupEventListeners();
+    
+    // 5. Ajusta a tela e inicia o loop da câmera
+    resizeCanvas();
+    updateUI();
+    requestAnimationFrame(gameLoop);
+});
+
+
+// ==========================================
+// 3. GAME LOOP DA CÂMERA E CONTROLES
+// ==========================================
+function gameLoop() {
+    let moved = false;
+    const speed = 15 / cameraZoom; 
+
+    // WASD fluido
+    if (keys['w'] || keys['arrowup']) { cameraY += speed; moved = true; }
+    if (keys['s'] || keys['arrowdown']) { cameraY -= speed; moved = true; }
+    if (keys['a'] || keys['arrowleft']) { cameraX += speed; moved = true; }
+    if (keys['d'] || keys['arrowright']) { cameraX -= speed; moved = true; }
+    
+    if (moved) drawIsometricGrid();
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function resizeCanvas() {
+    if (!container) return;
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+    originX = canvas.width / 2;
+    originY = canvas.height / 4; 
+    drawIsometricGrid();
+}
+
+function setupEventListeners() {
+    window.addEventListener('resize', resizeCanvas);
+
+    // Controles de Teclado
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'F12' || e.key === 'F5') return;
+        const k = e.key.toLowerCase();
+        keys[k] = true; 
+
+        if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(k)) { e.preventDefault(); return; }
+        if (e.ctrlKey && k === 'u') { e.preventDefault(); return; }
+        if (e.altKey) { e.preventDefault(); return; }
+
+        if (e.key === 'Control' || e.key === 'Meta') { isErasing = true; updateUI(); updatePreview(); drawIsometricGrid(); return; }
+        if (k === 'c') { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); return; }
+
+        if ((e.ctrlKey || e.metaKey) && k === 'z') {
+            e.preventDefault();
+            document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
+            setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
+            if (mapHistory.length > 0) {
+                const previousState = mapHistory.pop();
+                currentFloor = previousState.floor;
+                mapData = JSON.parse(JSON.stringify(previousState.data));
+                map = mapData[currentFloor];
+                updateUI(); drawIsometricGrid();
+            }
+            return;
+        }
+
+        if (['1','2','3','6','7','8'].includes(e.key)) {
+            currentBrush = parseInt(e.key);
+            isDragging = false; dragStartNode = null;
+            updateUI(); updatePreview(); drawIsometricGrid();
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.key.toLowerCase()] = false;
+        if (e.key === 'Control' || e.key === 'Meta') {
+            isErasing = false; updateUI(); updatePreview(); drawIsometricGrid();
+        }
+    });
+
+    // Zoom do Mouse (Scroll)
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        if (e.deltaY < 0) cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED);
+        else cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED);
+        drawIsometricGrid();
+    }, { passive: false });
+
+    // Câmera Zoom Botões
+    document.getElementById('btnZoomIn').addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
+    document.getElementById('btnZoomOut').addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
+    
+    // Rotação (Próximo Passo)
+    document.getElementById('btnRotL').addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
+    document.getElementById('btnRotR').addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
+
+    // UI da Barra Lateral
+    document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
+    document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
+    document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
+    document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
+    document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
+    document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
+    document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); });
+    document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); });
+    document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
+    document.getElementById('btnUndo').addEventListener('click', () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true })); });
+
+    document.getElementById('sliderAltura').addEventListener('input', (e) => { blockHeight = parseInt(e.target.value); document.getElementById('valorAltura').innerText = blockHeight; drawIsometricGrid(); });
+    document.getElementById('roofPitchSelect').addEventListener('change', (e) => { roofPitch = parseInt(e.target.value); drawIsometricGrid(); });
+    document.getElementById('colorSurface').addEventListener('input', (e) => { surfaceColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('colorUnderground').addEventListener('input', (e) => { undergroundColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('colorDirt').addEventListener('input', (e) => { dirtColor = e.target.value; drawIsometricGrid(); });
+    document.getElementById('colorRoof').addEventListener('input', (e) => { roofColor = e.target.value; drawIsometricGrid(); });
+
+    // A inteligência do Mouse com a Câmera ativada
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('mouseleave', () => { isDragging = false; dragStartNode = null; isErasing = false; updateUI(); updatePreview(); drawIsometricGrid(); });
+}
+
+// ==========================================
+// 4. LÓGICA CORE (Mapas e Interações)
+// ==========================================
 function createEmptyMap() {
     const newMap = [];
     for (let i = 0; i < 10; i++) {
@@ -117,18 +245,137 @@ function createEmptyMap() {
     return newMap;
 }
 
-mapData[0] = createEmptyMap();
-map = mapData[0];
+function handleMouseMove(e) {
+    isErasing = e.ctrlKey || e.metaKey;
+    updateUI(); 
 
-document.addEventListener('contextmenu', e => e.preventDefault());
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-function saveState() {
-    const snapshot = {
-        floor: currentFloor,
-        data: JSON.parse(JSON.stringify(mapData)) 
-    };
-    mapHistory.push(snapshot);
-    if (mapHistory.length > 30) mapHistory.shift();
+    hoverCol = -1; hoverRow = -1; hoverQuadrant = 'none';
+
+    ctx.save();
+    ctx.translate(originX + cameraX, originY + cameraY);
+    ctx.scale(cameraZoom, cameraZoom);
+    for (let row = 0; row < 10; row++) {
+        for (let col = 0; col < 10; col++) {
+            const pN = gridToScreen(row, col);
+            const pE = gridToScreen(row, col + 1);
+            const pS = gridToScreen(row + 1, col + 1);
+            const pW = gridToScreen(row + 1, col);
+            
+            defineTilePath(pN, pE, pS, pW);
+            
+            if (ctx.isPointInPath(mouseX, mouseY)) {
+                hoverRow = row; hoverCol = col;
+                
+                // O Quadrante agora respeita perfeitamente o Zoom e o Panning
+                const cX = (col - row) * (tileWidth / 2);
+                const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
+                const adjX = (mouseX - (originX + cameraX)) / cameraZoom;
+                const adjY = (mouseY - (originY + cameraY)) / cameraZoom;
+
+                if (adjX < cX && adjY < cY) hoverQuadrant = 'NW';
+                else if (adjX >= cX && adjY < cY) hoverQuadrant = 'NE';
+                else if (adjX < cX && adjY >= cY) hoverQuadrant = 'SW';
+                else hoverQuadrant = 'SE';
+            }
+        }
+    }
+    ctx.restore();
+
+    if (isDragging) {
+        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+            applySmartBrush(); 
+        }
+    }
+
+    updatePreview();
+    drawIsometricGrid();
+}
+
+function handleMouseDown(e) {
+    if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
+    
+    isErasing = e.ctrlKey || e.metaKey;
+    updateUI();
+    saveState(); 
+
+    if (e.shiftKey && currentBrush === 1) {
+        if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
+        const queue = [{r: hoverRow, c: hoverCol}];
+        const visited = new Set();
+        visited.add(`${hoverRow},${hoverCol}`);
+
+        while(queue.length > 0) {
+            const {r, c} = queue.shift();
+            const oldFloor = map[r][c].floor;
+            map[r][c].floor = isErasing ? 0 : 1;
+            
+            if (!isErasing && oldFloor === 0) continue;
+            
+            const wL = map[r][c].wallL > 0; const wR = map[r][c].wallR > 0;
+            const wWE = map[r][c].wallWE > 0; const wNS = map[r][c].wallNS > 0;
+            const wL_next = c < 9 && map[r][c+1].wallL > 0;
+            const wR_next = r < 9 && map[r+1][c].wallR > 0;
+
+            if (c > 0 && !wL && !wWE && !wNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
+            if (c < 9 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
+            if (r > 0 && !wR && !wWE && !wNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
+            if (r < 9 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+        }
+        drawIsometricGrid();
+        return; 
+    }
+
+    isDragging = true; 
+    
+    if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
+        dragStartNode = { type: currentBrush === 1 ? 'floor' : 'paint', row: hoverRow, col: hoverCol, erase: isErasing };
+        applySmartBrush(); 
+    } else if (currentBrush === 3) {
+        dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
+    } else {
+        const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
+        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
+        else if (isErasing) {
+            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
+            applySmartBrush();
+        }
+    }
+    
+    updatePreview();
+    drawIsometricGrid(); 
+}
+
+function handleMouseUp() {
+    if (isDragging) {
+        const eraseMode = dragStartNode.erase;
+        if (currentBrush === 2 || currentBrush === 3) {
+            if (!eraseMode) {
+                saveState(); 
+                previewWalls.forEach(p => {
+                    if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
+                    else if (p.side === 'R') map[p.row][p.col].wallR = blockHeight;
+                    else if (p.side === 'WE') map[p.row][p.col].wallWE = blockHeight;
+                    else if (p.side === 'NS') map[p.row][p.col].wallNS = blockHeight;
+                });
+            } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
+                saveState();
+                previewWalls.forEach(p => {
+                    if (p.side === 'L') map[p.row][p.col].wallL = 0;
+                    else if (p.side === 'R') map[p.row][p.col].wallR = 0;
+                    else if (p.side === 'WE') map[p.row][p.col].wallWE = 0;
+                    else if (p.side === 'NS') map[p.row][p.col].wallNS = 0;
+                });
+            }
+        }
+    }
+    isDragging = false; 
+    dragStartNode = null;
+    updatePreview();
+    drawIsometricGrid();
 }
 
 function gridToScreen(row, col) {
@@ -384,6 +631,9 @@ function updatePreview() {
     }
 }
 
+// ==========================================
+// 5. RENDERIZAÇÃO (A Mágica Visual)
+// ==========================================
 function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCutaway = false, showActiveTools = false, renderPass = 0) {
     const targetMap = mapData[fIndex];
     if (!targetMap || !targetMap[row]) return;
@@ -411,9 +661,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
 
         let isDirt = false;
-        if (fIndex <= 0) {
-            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
-        }
+        if (fIndex <= 0 && targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
 
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
@@ -433,7 +681,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.scale(1, 0.5); 
                 ctx.rotate(45 * Math.PI / 180); 
                 ctx.fillStyle = patterns[fTex];
-                ctx.fillRect(0, 0, tileWidth, tileWidth);
+                ctx.fillRect(0, 0, tileWidth * 1.5, tileWidth * 1.5);
                 ctx.restore();
             } else {
                 ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
@@ -502,7 +750,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (targetMap[row][col].column === 1) {
             let colH = applyCutaway ? cutawayHeight : blockHeight;
             const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
-            
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
@@ -514,10 +761,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     else if (renderPass === 1) {
         let hideLowerRoof = false;
-        if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
-            hideLowerRoof = true;
-        }
-
+        if (fIndex < currentFloor && isFloorEmpty(currentFloor)) hideLowerRoof = true;
         let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
@@ -635,14 +879,13 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 }
 
 function drawIsometricGrid() {
+    if (!mapData || !mapData[currentFloor]) return;
     precalculateRooms(); 
     
     ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     ctx.save();
-    
-    // O CORAÇÃO DA CÂMERA: Aplica o Zoom e o Panning via WASD
     ctx.translate(originX + cameraX, originY + cameraY);
     ctx.scale(cameraZoom, cameraZoom);
 
@@ -735,13 +978,8 @@ function applySmartBrush() {
 function changeFloor(delta) {
     saveState(); 
     currentFloor += delta;
-    
-    if (!mapData[currentFloor]) {
-        mapData[currentFloor] = createEmptyMap();
-    }
-    
+    if (!mapData[currentFloor]) mapData[currentFloor] = createEmptyMap();
     map = mapData[currentFloor];
-    
     updateUI();
     drawIsometricGrid();
 }
@@ -761,303 +999,3 @@ function updateUI() {
     let floorName = currentFloor === 0 ? "Térreo (0)" : (currentFloor > 0 ? `Superior (${currentFloor})` : `Subsolo (${currentFloor})`);
     document.getElementById('floorLabel').innerText = `Andar Atual: ${floorName}`;
 }
-
-document.getElementById('sliderAltura').addEventListener('input', (e) => {
-    blockHeight = parseInt(e.target.value);
-    document.getElementById('valorAltura').innerText = blockHeight;
-    drawIsometricGrid();
-});
-
-document.getElementById('roofPitchSelect').addEventListener('change', (e) => {
-    roofPitch = parseInt(e.target.value);
-    drawIsometricGrid();
-});
-
-document.getElementById('colorSurface').addEventListener('input', (e) => {
-    surfaceColor = e.target.value;
-    drawIsometricGrid();
-});
-document.getElementById('colorUnderground').addEventListener('input', (e) => {
-    undergroundColor = e.target.value;
-    drawIsometricGrid();
-});
-document.getElementById('colorDirt').addEventListener('input', (e) => {
-    dirtColor = e.target.value;
-    drawIsometricGrid();
-});
-document.getElementById('colorRoof').addEventListener('input', (e) => {
-    roofColor = e.target.value;
-    drawIsometricGrid();
-});
-
-// EVENTOS DE ZOOM E ROTAÇÃO (UI)
-document.getElementById('btnZoomIn').addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
-document.getElementById('btnZoomOut').addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
-document.getElementById('btnRotL').addEventListener('click', () => { alert("A Rotação Isométrica exige virar toda a Matriz de renderização e será nosso próximo desafio de lógica! Vamos testar o Zoom e o Pan WASD primeiro."); });
-document.getElementById('btnRotR').addEventListener('click', () => { alert("A Rotação Isométrica exige virar toda a Matriz de renderização e será nosso próximo desafio de lógica! Vamos testar o Zoom e o Pan WASD primeiro."); });
-
-// SCROLL DO MOUSE (Zoom Fluído)
-canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    if (e.deltaY < 0) cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED);
-    else cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED);
-    drawIsometricGrid();
-}, { passive: false });
-
-canvas.addEventListener('mousemove', (e) => {
-    isErasing = e.ctrlKey || e.metaKey;
-    updateUI(); 
-
-    const rect = canvas.getBoundingClientRect();
-    // A inteligência do Mouse agora entende o Panning e o Zoom perfeitamente!
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    hoverCol = -1; hoverRow = -1; hoverQuadrant = 'none';
-
-    ctx.save();
-    ctx.translate(originX + cameraX, originY + cameraY);
-    ctx.scale(cameraZoom, cameraZoom);
-    for (let row = 0; row < 10; row++) {
-        for (let col = 0; col < 10; col++) {
-            const pN = gridToScreen(row, col);
-            const pE = gridToScreen(row, col + 1);
-            const pS = gridToScreen(row + 1, col + 1);
-            const pW = gridToScreen(row + 1, col);
-            
-            defineTilePath(pN, pE, pS, pW);
-            
-            if (ctx.isPointInPath(mouseX, mouseY)) {
-                hoverRow = row; hoverCol = col;
-                
-                // O quadrante também precisa respeitar o Zoom para não ficar bugado!
-                const cX = (col - row) * (tileWidth / 2);
-                const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
-                const adjX = (mouseX - (originX + cameraX)) / cameraZoom;
-                const adjY = (mouseY - (originY + cameraY)) / cameraZoom;
-
-                if (adjX < cX && adjY < cY) hoverQuadrant = 'NW';
-                else if (adjX >= cX && adjY < cY) hoverQuadrant = 'NE';
-                else if (adjX < cX && adjY >= cY) hoverQuadrant = 'SW';
-                else hoverQuadrant = 'SE';
-            }
-        }
-    }
-    ctx.restore();
-
-    if (isDragging) {
-        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
-            applySmartBrush(); 
-        }
-    }
-
-    updatePreview();
-    drawIsometricGrid();
-});
-
-canvas.addEventListener('mousedown', (e) => { 
-    if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
-    
-    isErasing = e.ctrlKey || e.metaKey;
-    updateUI();
-    saveState(); 
-
-    if (e.shiftKey) {
-        if (currentBrush === 1) {
-            if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
-            const queue = [{r: hoverRow, c: hoverCol}];
-            const visited = new Set();
-            visited.add(`${hoverRow},${hoverCol}`);
-
-            while(queue.length > 0) {
-                const {r, c} = queue.shift();
-                const oldFloor = map[r][c].floor;
-                map[r][c].floor = isErasing ? 0 : 1;
-                
-                if (!isErasing && oldFloor === 0) continue;
-                
-                const wL = map[r][c].wallL > 0; const wR = map[r][c].wallR > 0;
-                const wWE = map[r][c].wallWE > 0; const wNS = map[r][c].wallNS > 0;
-                const wL_next = c < 9 && map[r][c+1].wallL > 0;
-                const wR_next = r < 9 && map[r+1][c].wallR > 0;
-
-                if (c > 0 && !wL && !wWE && !wNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
-                if (c < 9 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
-                if (r > 0 && !wR && !wWE && !wNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
-                if (r < 9 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
-            }
-        }
-        drawIsometricGrid();
-        return; 
-    }
-
-    isDragging = true; 
-    
-    if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
-        dragStartNode = { type: currentBrush === 1 ? 'floor' : 'paint', row: hoverRow, col: hoverCol, erase: isErasing };
-        applySmartBrush(); 
-    } else if (currentBrush === 3) {
-        dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
-    } else {
-        const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
-        else if (isErasing) {
-            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
-            applySmartBrush();
-        }
-    }
-    
-    updatePreview();
-    drawIsometricGrid(); 
-});
-
-canvas.addEventListener('mouseup', () => { 
-    if (isDragging) {
-        const eraseMode = dragStartNode.erase;
-        if (currentBrush === 2 || currentBrush === 3) {
-            if (!eraseMode) {
-                saveState(); 
-                previewWalls.forEach(p => {
-                    if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
-                    else if (p.side === 'R') map[p.row][p.col].wallR = blockHeight;
-                    else if (p.side === 'WE') map[p.row][p.col].wallWE = blockHeight;
-                    else if (p.side === 'NS') map[p.row][p.col].wallNS = blockHeight;
-                });
-            } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
-                saveState();
-                previewWalls.forEach(p => {
-                    if (p.side === 'L') map[p.row][p.col].wallL = 0;
-                    else if (p.side === 'R') map[p.row][p.col].wallR = 0;
-                    else if (p.side === 'WE') map[p.row][p.col].wallWE = 0;
-                    else if (p.side === 'NS') map[p.row][p.col].wallNS = 0;
-                });
-            }
-        }
-    }
-    isDragging = false; 
-    dragStartNode = null;
-    updatePreview();
-    drawIsometricGrid();
-});
-
-canvas.addEventListener('mouseleave', () => { 
-    isDragging = false; 
-    dragStartNode = null;
-    isErasing = false; 
-    updateUI();
-    updatePreview();
-    drawIsometricGrid();
-});
-
-window.addEventListener('keydown', (e) => {
-    if (e.key === 'F12' || e.key === 'F5') return;
-    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase())) { e.preventDefault(); return; }
-    if (e.ctrlKey && e.key.toLowerCase() === 'u') { e.preventDefault(); return; }
-    if (e.altKey) { e.preventDefault(); return; }
-
-    keys[e.key.toLowerCase()] = true; // Grava a tecla para o Panning WASD
-
-    if (e.key === 'Control' || e.key === 'Meta') {
-        isErasing = true;
-        updateUI();
-        updatePreview();
-        drawIsometricGrid();
-        return;
-    }
-
-    if (e.key === 'c' || e.key === 'C') {
-        isCutaway = !isCutaway;
-        updateUI();
-        drawIsometricGrid();
-        return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        document.getElementById('btnUndo').style.backgroundColor = 'rgba(255,255,255,0.2)';
-        setTimeout(() => document.getElementById('btnUndo').style.backgroundColor = '', 150);
-
-        if (mapHistory.length > 0) {
-            const previousState = mapHistory.pop();
-            currentFloor = previousState.floor;
-            mapData = JSON.parse(JSON.stringify(previousState.data));
-            map = mapData[currentFloor];
-            
-            updateUI();
-            drawIsometricGrid();
-        }
-        return;
-    }
-
-    if (['1','2','3','6','7','8'].includes(e.key)) {
-        currentBrush = parseInt(e.key);
-        isDragging = false;
-        dragStartNode = null;
-        updateUI();
-        updatePreview();
-        drawIsometricGrid();
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    keys[e.key.toLowerCase()] = false; // Libera a tecla do Panning WASD
-
-    if (e.key === 'Control' || e.key === 'Meta') {
-        isErasing = false;
-        updateUI();
-        updatePreview();
-        drawIsometricGrid();
-    }
-});
-
-// ==========================================
-// GAME LOOP PARA O MOVIMENTO DE CÂMERA (60FPS Smooth)
-// ==========================================
-function gameLoop() {
-    let moved = false;
-    const speed = 15 / cameraZoom; // Velocidade ajustada com o zoom
-
-    if (keys['w'] || keys['arrowup']) { cameraY += speed; moved = true; }
-    if (keys['s'] || keys['arrowdown']) { cameraY -= speed; moved = true; }
-    if (keys['a'] || keys['arrowleft']) { cameraX += speed; moved = true; }
-    if (keys['d'] || keys['arrowright']) { cameraX -= speed; moved = true; }
-    
-    if (moved) {
-        drawIsometricGrid();
-    }
-    requestAnimationFrame(gameLoop);
-}
-requestAnimationFrame(gameLoop); // Inicia o motor físico
-
-document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
-document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
-
-document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
-document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
-document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
-document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
-
-document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); });
-document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); });
-
-document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
-document.getElementById('btnUndo').addEventListener('click', () => { 
-    const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true });
-    window.dispatchEvent(event);
-});
-
-function resizeCanvas() {
-    if (!container) return;
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-    
-    // Calcula o ponto zero exato do centro da tela!
-    originX = canvas.width / 2;
-    originY = canvas.height / 4; 
-    
-    drawIsometricGrid();
-}
-
-window.addEventListener('resize', resizeCanvas);
-updateUI();
-resizeCanvas();
