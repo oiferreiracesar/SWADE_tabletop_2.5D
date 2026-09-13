@@ -3,9 +3,22 @@ const ctx = canvas.getContext('2d');
 const container = document.getElementById('canvas-container');
 
 // ==========================================
-// 🎨 GERENCIADOR DE TEXTURAS (SEU GITHUB)
+// 🎥 SISTEMA DE CÂMERA (Pan e Zoom)
 // ==========================================
-// Cole aqui as URLs diretas (Raw) das imagens hospedadas no seu GitHub.
+let cameraX = 0;
+let cameraY = 0;
+let cameraZoom = 0.8; // Zoom inicial mais afastado para corrigir a "aproximação"
+const ZOOM_SPEED = 0.1;
+
+let originX = 0; 
+let originY = 0;
+
+// Estado do Teclado para movimento fluido WASD
+const keys = {};
+
+// ==========================================
+// 🎨 GERENCIADOR DE TEXTURAS
+// ==========================================
 const textureURLs = {
     'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
     'grama': 'https://www.transparenttextures.com/patterns/grass.png',
@@ -17,17 +30,15 @@ const textureURLs = {
 const patterns = {};
 let currentTexture = 'madeira';
 
-// Pre-carrega todas as texturas antes de rodar perfeitamente
 Object.keys(textureURLs).forEach(key => {
     let img = new Image();
     img.src = textureURLs[key];
     img.onload = () => {
         patterns[key] = ctx.createPattern(img, 'repeat');
-        drawIsometricGrid(); // Atualiza a tela assim que a imagem baixar
+        drawIsometricGrid(); 
     };
 });
 
-// Inicializa a UI das Texturas
 const texturePalette = document.getElementById('texturePalette');
 Object.keys(textureURLs).forEach(key => {
     let wrapper = document.createElement('div');
@@ -41,7 +52,7 @@ Object.keys(textureURLs).forEach(key => {
         document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         if(currentBrush !== 7 && currentBrush !== 8) {
-            currentBrush = 7; // Auto-seleciona a pintura de chão se não estiver com pincel
+            currentBrush = 7; 
             updateUI();
         }
     };
@@ -58,9 +69,6 @@ Object.keys(textureURLs).forEach(key => {
 
 const tileWidth = 64;
 const tileHeight = 32;
-
-let originX = 0; 
-let originY = 100;
 
 const levelHeight = 48; 
 let blockHeight = 48; 
@@ -91,7 +99,6 @@ let map;
 
 let enclosedCache = {};
 
-// NOVA FUNÇÃO: O Mapa agora memoriza as texturas!
 function createEmptyMap() {
     const newMap = [];
     for (let i = 0; i < 10; i++) {
@@ -130,7 +137,15 @@ function gridToScreen(row, col) {
     return { x, y };
 }
 
-// O NOVO RENDERIZADOR DE PAREDES (Com suporte à texturas e Sombras 3D mantidas!)
+function defineTilePath(pNorte, pLeste, pSul, pOeste) {
+    ctx.beginPath();
+    ctx.moveTo(pNorte.x, pNorte.y);
+    ctx.lineTo(pLeste.x, pLeste.y);
+    ctx.lineTo(pSul.x, pSul.y);
+    ctx.lineTo(pOeste.x, pOeste.y);
+    ctx.closePath();
+}
+
 function drawFlatWall(p1, p2, height, baseColor, z1 = 0, z2 = 0, texPattern = null) {
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y - z1); 
@@ -148,7 +163,6 @@ function drawFlatWall(p1, p2, height, baseColor, z1 = 0, z2 = 0, texPattern = nu
         ctx.fill();
         ctx.restore();
 
-        // Camada de Sombra Direcional 3D por Cima da Textura!
         let overlay = baseColor === '#b71c1c' ? 'rgba(0,0,0,0.5)' : 
                       baseColor === '#e53935' ? 'rgba(0,0,0,0.1)' : 
                       baseColor === '#d32f2f' ? 'rgba(0,0,0,0.4)' : 
@@ -401,7 +415,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
         }
 
-        // O NOVO RENDERIZADOR DE CHÃO (Com Suporte à Transformação Isométrica de Texturas!)
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
             ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
@@ -415,12 +428,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             
             if (fTex && patterns[fTex] && !isGhost && !activeEraseMode) {
                 ctx.save();
-                ctx.clip(); // Restringe a textura apenas dentro do losango do chão
-                ctx.translate(pNorte.x, pNorte.y); // Move a âncora para o topo do losango
-                ctx.scale(1, 0.5); // Amassa a textura na vertical (Projeção Isométrica)
-                ctx.rotate(45 * Math.PI / 180); // Rotaciona a textura em 45º
+                ctx.clip(); 
+                ctx.translate(pNorte.x, pNorte.y); 
+                ctx.scale(1, 0.5); 
+                ctx.rotate(45 * Math.PI / 180); 
                 ctx.fillStyle = patterns[fTex];
-                // Desenha a textura grande o suficiente para cobrir todo o tile deformado
                 ctx.fillRect(0, 0, tileWidth, tileWidth);
                 ctx.restore();
             } else {
@@ -429,13 +441,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             }
         }
         
-        // Desenha a linha de Grade fina sobre as texturas
         if (shouldDrawGrid) {
             ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
             ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : 'rgba(0,0,0,0.2)'); ctx.stroke();
         }
 
-        // Preview da Ferramenta ativa
         if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging) {
             const supp = isFloorSupported(row, col);
             if (currentBrush === 1 || currentBrush === 7) {
@@ -467,7 +477,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             if (hNS > 0 && checkR(row, col)) { zNS_N = Math.min(hNS, getRoofZ(fB, row, col, roofPitch)); zNS_S = Math.min(hNS, getRoofZ(fB, row+1, col+1, roofPitch)); }
         }
 
-        // Enviando as texturas memorizadas para as paredes
         let texL = isGhost || activeEraseMode ? null : targetMap[row][col].wallLTex;
         let texR = isGhost || activeEraseMode ? null : targetMap[row][col].wallRTex;
         let texWE = isGhost || activeEraseMode ? null : targetMap[row][col].wallWETex;
@@ -478,11 +487,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f', zWE_W, zWE_E, texWE); 
         if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828', zNS_N, zNS_S, texNS); 
 
-        // Ferramenta ativa na parede
         if (showActiveTools && currentBrush === 8 && row === hoverRow && col === hoverCol && !isDragging) {
             let edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
             if(edge && map[edge.row][edge.col]['wall' + edge.side] > 0) {
-                // Desenha a sombra vermelha no hover da pintura
                 let pA, pB;
                 if(edge.side === 'L') { pA = gridToScreen(edge.row+1, edge.col); pB = gridToScreen(edge.row, edge.col); }
                 if(edge.side === 'R') { pA = gridToScreen(edge.row, edge.col); pB = gridToScreen(edge.row, edge.col+1); }
@@ -578,11 +585,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
                 ctx.fillStyle = roofColor; ctx.fill();
                 
-                // O Telhado agora puxa a textura 'telha' da sua biblioteca automaticamente!
-                if (patterns['telha']) {
-                    ctx.fillStyle = patterns['telha'];
-                    ctx.fill();
-                }
+                if (patterns['telha']) { ctx.fillStyle = patterns['telha']; ctx.fill(); }
 
                 ctx.fillStyle = overlay; ctx.fill();
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
@@ -638,7 +641,10 @@ function drawIsometricGrid() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     ctx.save();
-    ctx.translate(originX, originY);
+    
+    // O CORAÇÃO DA CÂMERA: Aplica o Zoom e o Panning via WASD
+    ctx.translate(originX + cameraX, originY + cameraY);
+    ctx.scale(cameraZoom, cameraZoom);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
@@ -676,7 +682,6 @@ function applySmartBrush() {
 
     if (!isCutaway) return; 
 
-    // NOVO: Pintura Inteligente de Chão e Parede
     if (currentBrush === 7) { 
         if (map[hoverRow][hoverCol].floor > 0) {
             map[hoverRow][hoverCol].floorTex = currentEraseMode ? null : currentTexture;
@@ -738,7 +743,6 @@ function changeFloor(delta) {
     map = mapData[currentFloor];
     
     updateUI();
-    updatePreview();
     drawIsometricGrid();
 }
 
@@ -748,7 +752,6 @@ function updateUI() {
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnColuna').classList.toggle('active', currentBrush === 6 && !isErasing);
     
-    // UI das novas ferramentas de pintura
     document.getElementById('btnPaintFloor').classList.toggle('active', currentBrush === 7 && !isErasing);
     document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
 
@@ -762,7 +765,6 @@ function updateUI() {
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
     blockHeight = parseInt(e.target.value);
     document.getElementById('valorAltura').innerText = blockHeight;
-    updatePreview();
     drawIsometricGrid();
 });
 
@@ -788,18 +790,34 @@ document.getElementById('colorRoof').addEventListener('input', (e) => {
     drawIsometricGrid();
 });
 
+// EVENTOS DE ZOOM E ROTAÇÃO (UI)
+document.getElementById('btnZoomIn').addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
+document.getElementById('btnZoomOut').addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
+document.getElementById('btnRotL').addEventListener('click', () => { alert("A Rotação Isométrica exige virar toda a Matriz de renderização e será nosso próximo desafio de lógica! Vamos testar o Zoom e o Pan WASD primeiro."); });
+document.getElementById('btnRotR').addEventListener('click', () => { alert("A Rotação Isométrica exige virar toda a Matriz de renderização e será nosso próximo desafio de lógica! Vamos testar o Zoom e o Pan WASD primeiro."); });
+
+// SCROLL DO MOUSE (Zoom Fluído)
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED);
+    else cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED);
+    drawIsometricGrid();
+}, { passive: false });
+
 canvas.addEventListener('mousemove', (e) => {
     isErasing = e.ctrlKey || e.metaKey;
     updateUI(); 
 
     const rect = canvas.getBoundingClientRect();
-    const adjX = (e.clientX - rect.left) - originX;
-    const adjY = (e.clientY - rect.top) - originY;
+    // A inteligência do Mouse agora entende o Panning e o Zoom perfeitamente!
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
     hoverCol = -1; hoverRow = -1; hoverQuadrant = 'none';
 
     ctx.save();
-    ctx.translate(originX, originY);
+    ctx.translate(originX + cameraX, originY + cameraY);
+    ctx.scale(cameraZoom, cameraZoom);
     for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
             const pN = gridToScreen(row, col);
@@ -809,10 +827,15 @@ canvas.addEventListener('mousemove', (e) => {
             
             defineTilePath(pN, pE, pS, pW);
             
-            if (ctx.isPointInPath(e.clientX - rect.left, e.clientY - rect.top)) {
+            if (ctx.isPointInPath(mouseX, mouseY)) {
                 hoverRow = row; hoverCol = col;
+                
+                // O quadrante também precisa respeitar o Zoom para não ficar bugado!
                 const cX = (col - row) * (tileWidth / 2);
                 const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
+                const adjX = (mouseX - (originX + cameraX)) / cameraZoom;
+                const adjY = (mouseY - (originY + cameraY)) / cameraZoom;
+
                 if (adjX < cX && adjY < cY) hoverQuadrant = 'NW';
                 else if (adjX >= cX && adjY < cY) hoverQuadrant = 'NE';
                 else if (adjX < cX && adjY >= cY) hoverQuadrant = 'SW';
@@ -840,7 +863,6 @@ canvas.addEventListener('mousedown', (e) => {
     saveState(); 
 
     if (e.shiftKey) {
-        // Flood Fill para construção
         if (currentBrush === 1) {
             if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
             const queue = [{r: hoverRow, c: hoverCol}];
@@ -933,6 +955,8 @@ window.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key.toLowerCase() === 'u') { e.preventDefault(); return; }
     if (e.altKey) { e.preventDefault(); return; }
 
+    keys[e.key.toLowerCase()] = true; // Grava a tecla para o Panning WASD
+
     if (e.key === 'Control' || e.key === 'Meta') {
         isErasing = true;
         updateUI();
@@ -976,6 +1000,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
+    keys[e.key.toLowerCase()] = false; // Libera a tecla do Panning WASD
+
     if (e.key === 'Control' || e.key === 'Meta') {
         isErasing = false;
         updateUI();
@@ -983,6 +1009,25 @@ window.addEventListener('keyup', (e) => {
         drawIsometricGrid();
     }
 });
+
+// ==========================================
+// GAME LOOP PARA O MOVIMENTO DE CÂMERA (60FPS Smooth)
+// ==========================================
+function gameLoop() {
+    let moved = false;
+    const speed = 15 / cameraZoom; // Velocidade ajustada com o zoom
+
+    if (keys['w'] || keys['arrowup']) { cameraY += speed; moved = true; }
+    if (keys['s'] || keys['arrowdown']) { cameraY -= speed; moved = true; }
+    if (keys['a'] || keys['arrowleft']) { cameraX += speed; moved = true; }
+    if (keys['d'] || keys['arrowright']) { cameraX -= speed; moved = true; }
+    
+    if (moved) {
+        drawIsometricGrid();
+    }
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop); // Inicia o motor físico
 
 document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
 document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
@@ -992,7 +1037,6 @@ document.getElementById('btnParede').addEventListener('click', () => { currentBr
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
 
-// Botões das novas ferramentas
 document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); });
 document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); });
 
@@ -1006,7 +1050,11 @@ function resizeCanvas() {
     if (!container) return;
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
+    
+    // Calcula o ponto zero exato do centro da tela!
     originX = canvas.width / 2;
+    originY = canvas.height / 4; 
+    
     drawIsometricGrid();
 }
 

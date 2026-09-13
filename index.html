@@ -22,6 +22,8 @@
         h2 { font-size: 1.05rem; margin: 0 0 15px 0; border-bottom: 2px solid #334155; padding-bottom: 8px; color: #94a3b8; }
 
         .tool-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        .row-group { display: flex; gap: 8px; justify-content: space-between; }
+        .row-group button { flex-grow: 1; text-align: center; }
 
         button {
             background-color: #334155; color: #f8fafc; border: 1px solid #475569;
@@ -42,42 +44,41 @@
         .slider-group { display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; margin-bottom: 15px; }
         select { background-color: #334155; color: white; border: 1px solid #475569; padding: 6px; border-radius: 4px; width: 100%; }
 
-        /* NOVO: Paleta de Texturas */
-        .texture-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 20px;
-        }
-        .texture-btn {
-            height: 50px;
-            border-radius: 6px;
-            border: 2px solid transparent;
-            cursor: pointer;
-            background-size: cover;
-            background-position: center;
-            transition: 0.2s;
-        }
+        .texture-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+        .texture-btn { height: 50px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; background-size: cover; background-position: center; transition: 0.2s; }
         .texture-btn:hover { border-color: #94a3b8; transform: scale(1.05); }
         .texture-btn.selected { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
         .texture-label { font-size: 0.75rem; text-align: center; color: #cbd5e1; margin-top: 4px; }
         .texture-wrapper { display: flex; flex-direction: column; }
 
-        #canvas-container {
-            flex-grow: 1; position: relative;
-            width: calc(100vw - 280px); height: 100vh; overflow: hidden;
-        }
+        .color-picker { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 8px; }
+        .color-picker input[type="color"] { cursor: pointer; border: none; border-radius: 4px; width: 30px; height: 30px; padding: 0; background: none; }
+
+        #canvas-container { flex-grow: 1; position: relative; width: calc(100vw - 280px); height: 100vh; overflow: hidden; }
         #gameCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; display: block; }
     </style>
 </head>
 <body>
 
     <div id="ui-panel">
+        
         <div class="floor-controls">
             <button id="btnFloorDown" title="Descer Andar">▼</button>
             <span id="floorLabel">Andar Atual: Térreo (0)</span>
             <button id="btnFloorUp" title="Subir Andar">▲</button>
         </div>
+
+        <!-- CONTROLE DE CÂMERA -->
+        <h2>Câmera</h2>
+        <div class="tool-group row-group">
+            <button id="btnZoomOut" title="Afastar">➖ Zoom</button>
+            <button id="btnZoomIn" title="Aproximar">➕ Zoom</button>
+        </div>
+        <div class="tool-group row-group">
+            <button id="btnRotL" title="Em breve!">↺ Girar</button>
+            <button id="btnRotR" title="Em breve!">Girar ↻</button>
+        </div>
+        <div style="font-size: 0.75rem; color: #94a3b8; text-align: center; margin-bottom: 20px;">Use WASD ou Setas para mover o mapa</div>
 
         <h2>Construção</h2>
         <div class="tool-group">
@@ -93,11 +94,8 @@
             <button id="btnPaintWall">Pintar Parede (8)</button>
         </div>
 
-        <!-- BIBLIOTECA DE TEXTURAS -->
         <h2>Biblioteca de Texturas</h2>
-        <div class="texture-grid" id="texturePalette">
-            <!-- Botões gerados via JS -->
-        </div>
+        <div class="texture-grid" id="texturePalette"></div>
 
         <h2>Ações</h2>
         <div class="tool-group">
@@ -110,6 +108,7 @@
             <label for="sliderAltura">Altura das Paredes: <strong id="valorAltura">48</strong></label>
             <input type="range" id="sliderAltura" min="12" max="96" value="48">
         </div>
+
     </div>
 
     <div id="canvas-container">
