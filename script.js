@@ -6,7 +6,7 @@ let canvas, ctx, container, texturePalette;
 const tileWidth = 64;
 const tileHeight = 32;
 
-// Câmera
+// Câmera e Responsividade
 let cameraX = 0;
 let cameraY = 0;
 let cameraZoom = 1.0; 
@@ -36,7 +36,7 @@ let map;
 let mapHistory = [];
 let enclosedCache = {};
 
-// Texturas
+// Texturas (Puxando do GitHub / Externo)
 const textureURLs = {
     'concreto': 'https://www.transparenttextures.com/patterns/concrete-wall.png', 
     'grama': 'https://www.transparenttextures.com/patterns/grass.png',
@@ -47,7 +47,6 @@ const textureURLs = {
 const patterns = {};
 let currentTexture = 'madeira';
 
-
 // ==========================================
 // 2. INICIALIZAÇÃO SEGURA (Prevenção de Crash)
 // ==========================================
@@ -57,11 +56,10 @@ window.addEventListener('DOMContentLoaded', () => {
     container = document.getElementById('canvas-container');
     texturePalette = document.getElementById('texturePalette');
 
-    // 1. Inicia o mapa primeiro!
     mapData[0] = createEmptyMap();
     map = mapData[0];
 
-    // 2. Constrói a UI de Texturas
+    // Constrói a UI de Texturas
     if (texturePalette) {
         Object.keys(textureURLs).forEach(key => {
             let wrapper = document.createElement('div');
@@ -90,10 +88,10 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. Carrega as imagens com segurança (CORS ativado)
+    // Carrega as imagens com segurança
     Object.keys(textureURLs).forEach(key => {
         let img = new Image();
-        img.crossOrigin = "Anonymous"; // Evita bloqueios de segurança
+        img.crossOrigin = "Anonymous";
         img.src = textureURLs[key];
         img.onload = () => {
             patterns[key] = ctx.createPattern(img, 'repeat');
@@ -101,15 +99,11 @@ window.addEventListener('DOMContentLoaded', () => {
         };
     });
 
-    // 4. Liga os controles
     setupEventListeners();
-    
-    // 5. Ajusta a tela e inicia o loop da câmera
     resizeCanvas();
     updateUI();
     requestAnimationFrame(gameLoop);
 });
-
 
 // ==========================================
 // 3. GAME LOOP DA CÂMERA E CONTROLES
@@ -118,7 +112,6 @@ function gameLoop() {
     let moved = false;
     const speed = 15 / cameraZoom; 
 
-    // WASD fluido
     if (keys['w'] || keys['arrowup']) { cameraY += speed; moved = true; }
     if (keys['s'] || keys['arrowdown']) { cameraY -= speed; moved = true; }
     if (keys['a'] || keys['arrowleft']) { cameraX += speed; moved = true; }
@@ -141,7 +134,6 @@ function resizeCanvas() {
 function setupEventListeners() {
     window.addEventListener('resize', resizeCanvas);
 
-    // Controles de Teclado
     window.addEventListener('keydown', (e) => {
         if (e.key === 'F12' || e.key === 'F5') return;
         const k = e.key.toLowerCase();
@@ -182,7 +174,6 @@ function setupEventListeners() {
         }
     });
 
-    // Zoom do Mouse (Scroll)
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         if (e.deltaY < 0) cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED);
@@ -190,15 +181,11 @@ function setupEventListeners() {
         drawIsometricGrid();
     }, { passive: false });
 
-    // Câmera Zoom Botões
     document.getElementById('btnZoomIn').addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
     document.getElementById('btnZoomOut').addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
-    
-    // Rotação (Próximo Passo)
     document.getElementById('btnRotL').addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
     document.getElementById('btnRotR').addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
 
-    // UI da Barra Lateral
     document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
     document.getElementById('btnFloorDown').addEventListener('click', () => changeFloor(-1));
     document.getElementById('btnPiso').addEventListener('click', () => { currentBrush = 1; updateUI(); });
@@ -217,7 +204,6 @@ function setupEventListeners() {
     document.getElementById('colorDirt').addEventListener('input', (e) => { dirtColor = e.target.value; drawIsometricGrid(); });
     document.getElementById('colorRoof').addEventListener('input', (e) => { roofColor = e.target.value; drawIsometricGrid(); });
 
-    // A inteligência do Mouse com a Câmera ativada
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mouseup', handleMouseUp);
@@ -270,7 +256,6 @@ function handleMouseMove(e) {
             if (ctx.isPointInPath(mouseX, mouseY)) {
                 hoverRow = row; hoverCol = col;
                 
-                // O Quadrante agora respeita perfeitamente o Zoom e o Panning
                 const cX = (col - row) * (tileWidth / 2);
                 const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
                 const adjX = (mouseX - (originX + cameraX)) / cameraZoom;
@@ -661,7 +646,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         }
 
         let isDirt = false;
-        if (fIndex <= 0 && targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
+        if (fIndex <= 0) {
+            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
+        }
 
         if (isDirt) {
             ctx.fillStyle = dirtColor; 
@@ -750,6 +737,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (targetMap[row][col].column === 1) {
             let colH = applyCutaway ? cutawayHeight : blockHeight;
             const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
+            
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
@@ -761,7 +749,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     else if (renderPass === 1) {
         let hideLowerRoof = false;
-        if (fIndex < currentFloor && isFloorEmpty(currentFloor)) hideLowerRoof = true;
+        if (fIndex < currentFloor && isFloorEmpty(currentFloor)) {
+            hideLowerRoof = true;
+        }
+
         let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
