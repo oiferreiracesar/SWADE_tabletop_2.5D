@@ -13,7 +13,7 @@ let cameraZoom = 1.0;
 const ZOOM_SPEED = 0.1;
 let originX = 0; 
 let originY = 0;
-const keys = {}; // Guarda o estado das teclas WASD
+const keys = {}; 
 
 const levelHeight = 48; 
 let blockHeight = 48; 
@@ -50,7 +50,7 @@ const patterns = {};
 let currentTexture = 'madeira';
 
 // ==========================================
-// 3. INICIALIZAÇÃO SEGURA
+// 3. INICIALIZAÇÃO SEGURA E GAME LOOP
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('gameCanvas');
@@ -61,7 +61,7 @@ window.addEventListener('DOMContentLoaded', () => {
     mapData[0] = createEmptyMap();
     map = mapData[0];
 
-    // Constrói UI de Texturas dinamicamente
+    // Constrói UI de Texturas de forma dinâmica
     if (texturePalette) {
         Object.keys(textureURLs).forEach(key => {
             let wrapper = document.createElement('div');
@@ -71,15 +71,11 @@ window.addEventListener('DOMContentLoaded', () => {
             btn.className = 'texture-btn ' + (key === currentTexture ? 'selected' : '');
             btn.style.backgroundImage = `url(${textureURLs[key]})`;
             
-            // Lógica inteligente: Clicar numa textura ativa a pintura automaticamente
+            // A CORREÇÃO UX VERDADEIRA: O Sequestro do Mouse foi deletado!
             btn.onclick = () => {
                 currentTexture = key;
                 document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
-                if(currentBrush !== 7 && currentBrush !== 8) {
-                    currentBrush = 7; 
-                    updateUI();
-                }
             };
 
             let label = document.createElement('div');
@@ -107,10 +103,9 @@ window.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     resizeCanvas();
     updateUI();
-    requestAnimationFrame(gameLoop); // Dá a partida no motor WASD
+    requestAnimationFrame(gameLoop);
 });
 
-// Calcula perfeitamente a resolução do monitor
 function resizeCanvas() {
     if (!canvas) return;
     let w = container ? container.clientWidth : window.innerWidth - 280;
@@ -124,7 +119,6 @@ function resizeCanvas() {
     drawIsometricGrid();
 }
 
-// O Motor Físico (60 frames por segundo para Câmera lisa)
 function gameLoop() {
     let moved = false;
     const speed = 15 / cameraZoom; 
@@ -191,6 +185,7 @@ function setupEventListeners() {
         drawIsometricGrid();
     }, { passive: false });
 
+    // Botões Seguros
     document.getElementById('btnZoomIn')?.addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
     document.getElementById('btnZoomOut')?.addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
     document.getElementById('btnRotL')?.addEventListener('click', () => { alert("Giro isométrico será o próximo passo!"); });
@@ -297,7 +292,7 @@ function handleMouseDown(e) {
     updateUI();
     saveState(); 
 
-    // Ferramenta de Preenchimento (Balde de Tinta com Shift)
+    // Flood Fill
     if (e.shiftKey && (currentBrush === 1 || currentBrush === 7)) {
         if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
@@ -407,7 +402,6 @@ function drawFlatWall(p1, p2, height, baseColor, z1 = 0, z2 = 0, texPattern = nu
     ctx.fillStyle = baseColor;
     ctx.fill();
 
-    // Aplica a textura da parede com Sombreamento Direcional!
     if (texPattern && patterns[texPattern]) {
         ctx.save();
         ctx.fillStyle = patterns[texPattern];
@@ -680,7 +674,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
             let fTex = targetMap[row][col].floorTex;
             
-            // Distorce a Textura do Chão para a Perspectiva Isométrica Perfeita!
             if (fTex && patterns[fTex] && !isGhost && !activeEraseMode) {
                 ctx.save();
                 ctx.clip(); 
@@ -772,7 +765,6 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
-            
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
             let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
@@ -899,7 +891,6 @@ function drawIsometricGrid() {
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     
-    // Garantia Anti-Crash para o modo de Arrastar/Apagar
     let currentEraseMode = isErasing;
     if (isDragging && dragStartNode) currentEraseMode = dragStartNode.erase;
 
@@ -930,14 +921,13 @@ function drawIsometricGrid() {
     ctx.restore();
 }
 
-// A FUNÇÃO CORAÇÃO (Limpa e Blindada)
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
     
     let currentEraseMode = isErasing;
     if (isDragging && dragStartNode) currentEraseMode = dragStartNode.erase;
 
-    // Pintar Chão (7)
+    // Pintura Inteligente de Chão (7)
     if (currentBrush === 7) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         if (!currentEraseMode) {
@@ -949,7 +939,7 @@ function applySmartBrush() {
         return;
     }
     
-    // Pintar Parede (8)
+    // Pintura Inteligente de Parede (8)
     if (currentBrush === 8) {
         let edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
         if (edge) {
@@ -965,7 +955,6 @@ function applySmartBrush() {
         return;
     }
 
-    // Piso (1)
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         if (!currentEraseMode) {
@@ -977,7 +966,6 @@ function applySmartBrush() {
         return; 
     }
     
-    // Coluna (6)
     if (currentBrush === 6) {
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
         map[hoverRow][hoverCol].column = currentEraseMode ? 0 : 1;
@@ -989,7 +977,6 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
-    // Parede Simples (2) - Arrastando
     if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
         if (!currentEraseMode && !isWallSupported(tRow, tCol, side)) return;
 
