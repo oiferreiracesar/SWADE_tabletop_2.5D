@@ -13,7 +13,7 @@ let cameraZoom = 1.0;
 const ZOOM_SPEED = 0.1;
 let originX = 0; 
 let originY = 0;
-const keys = {}; // Estado do teclado para o WASD
+const keys = {}; 
 
 const levelHeight = 48; 
 let blockHeight = 48; 
@@ -61,7 +61,7 @@ window.addEventListener('DOMContentLoaded', () => {
     mapData[0] = createEmptyMap();
     map = mapData[0];
 
-    // Constrói UI de Texturas
+    // Constrói UI de Texturas de forma dinâmica
     if (texturePalette) {
         Object.keys(textureURLs).forEach(key => {
             let wrapper = document.createElement('div');
@@ -74,8 +74,10 @@ window.addEventListener('DOMContentLoaded', () => {
                 currentTexture = key;
                 document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
-                // CORREÇÃO UX: Não forçamos mais a mudança de ferramenta. 
-                // Apenas deixamos a textura ativa para a ferramenta que você já está usando!
+                if(currentBrush !== 7 && currentBrush !== 8) {
+                    currentBrush = 7; 
+                    updateUI();
+                }
             };
 
             let label = document.createElement('div');
@@ -88,11 +90,11 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Carrega Texturas Blindado
+    // Carrega Texturas com proteção Anti-Crash
     Object.keys(textureURLs).forEach(key => {
         let img = new Image();
         img.crossOrigin = "Anonymous";
-        img.onerror = () => console.log("Textura não carregou: " + key);
+        img.onerror = () => console.warn("Textura não carregou: " + key);
         img.src = textureURLs[key];
         img.onload = () => {
             patterns[key] = ctx.createPattern(img, 'repeat');
@@ -185,10 +187,11 @@ function setupEventListeners() {
         drawIsometricGrid();
     }, { passive: false });
 
+    // Botões Seguros (Anti-Null)
     document.getElementById('btnZoomIn')?.addEventListener('click', () => { cameraZoom = Math.min(3.0, cameraZoom + ZOOM_SPEED); drawIsometricGrid(); });
     document.getElementById('btnZoomOut')?.addEventListener('click', () => { cameraZoom = Math.max(0.3, cameraZoom - ZOOM_SPEED); drawIsometricGrid(); });
-    document.getElementById('btnRotL')?.addEventListener('click', () => { alert("Giro isométrico será o próximo passo!"); });
-    document.getElementById('btnRotR')?.addEventListener('click', () => { alert("Giro isométrico será o próximo passo!"); });
+    document.getElementById('btnRotL')?.addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
+    document.getElementById('btnRotR')?.addEventListener('click', () => { alert("A Câmera foi consertada! O giro isométrico será nosso próximo passo."); });
 
     document.getElementById('btnFloorUp')?.addEventListener('click', () => changeFloor(1));
     document.getElementById('btnFloorDown')?.addEventListener('click', () => changeFloor(-1));
@@ -275,7 +278,7 @@ function handleMouseMove(e) {
     ctx.restore();
 
     if (isDragging) {
-        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode?.erase && dragStartNode?.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -291,7 +294,6 @@ function handleMouseDown(e) {
     updateUI();
     saveState(); 
 
-    // Flood Fill Melhorado (Shift + Click)
     if (e.shiftKey && (currentBrush === 1 || currentBrush === 7)) {
         if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
@@ -302,7 +304,6 @@ function handleMouseDown(e) {
         while(queue.length > 0) {
             const {r, c} = queue.shift();
             
-            // Se for ferramenta de pintura (7), preenche apenas chão já existente
             if (currentBrush === 7 && startIsFloor && map[r][c].floor === 0) continue;
             
             if (!isErasing) {
@@ -336,9 +337,12 @@ function handleMouseDown(e) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
     } else {
         const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
+        // Garantia Anti-Crash: Se a quina for inválida, ele assume 'L'
         if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side, erase: isErasing };
-        else if (isErasing) {
-            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
+        else dragStartNode = { type: 'wall', row: hoverRow, col: hoverCol, side: 'L', erase: isErasing };
+        
+        if (isErasing) {
+            dragStartNode.type = 'floor';
             applySmartBrush();
         }
     }
@@ -349,19 +353,25 @@ function handleMouseDown(e) {
 
 function handleMouseUp() {
     if (isDragging) {
-        const eraseMode = dragStartNode.erase;
+        // Blindagem contra crashes de nódulos nulos
+        const eraseMode = dragStartNode?.erase || false; 
+        
         if (currentBrush === 2 || currentBrush === 3) {
             if (!eraseMode) {
                 saveState(); 
                 previewWalls.forEach(p => {
-                    map[p.row][p.col]['wall' + p.side] = blockHeight;
-                    map[p.row][p.col]['wall' + p.side + 'Tex'] = currentTexture; // Auto-Pinta as Paredes construídas
+                    if(map[p.row] && map[p.row][p.col]) {
+                        map[p.row][p.col]['wall' + p.side] = blockHeight;
+                        map[p.row][p.col]['wall' + p.side + 'Tex'] = currentTexture;
+                    }
                 });
             } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
                 saveState();
                 previewWalls.forEach(p => {
-                    map[p.row][p.col]['wall' + p.side] = 0;
-                    map[p.row][p.col]['wall' + p.side + 'Tex'] = null;
+                    if(map[p.row] && map[p.row][p.col]) {
+                        map[p.row][p.col]['wall' + p.side] = 0;
+                        map[p.row][p.col]['wall' + p.side + 'Tex'] = null;
+                    }
                 });
             }
         }
@@ -566,7 +576,8 @@ function updatePreview() {
     previewWalls = [];
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
 
-    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
+    // Acesso Blindado: Nunca assume que dragStartNode existe livremente
+    const currentEraseMode = (isDragging && dragStartNode) ? dragStartNode.erase : isErasing;
 
     if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
         if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
@@ -574,7 +585,6 @@ function updatePreview() {
             const dR = hoverRow - start.row;
             const dC = hoverCol - start.col;
 
-            // CORREÇÃO UX: Impede que a parede construída no mesmo quadrado force o lado esquerdo
             if (dR === 0 && dC === 0) {
                 previewWalls.push({ row: start.row, col: start.col, side: start.side });
             } else if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
@@ -747,6 +757,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         if (targetMap[row][col].column === 1) {
             let colH = applyCutaway ? cutawayHeight : blockHeight;
             const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
+            
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
@@ -762,6 +773,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         let isIndoors = enclosedCache[`${fIndex},${row},${col}`] || targetMap[row][col].floor > 0;
 
         if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
+            
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
             let zE = getRoofZ(fIndex, row, col + 1, roofPitch);
@@ -806,7 +818,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.fillStyle = roofColor;
                 ctx.beginPath(); ctx.moveTo(p1_2d.x, p1_2d.y); ctx.lineTo(p2_2d.x, p2_2d.y); ctx.lineTo(p2_2d.x, p2_2d.y + p2_3d.z); ctx.lineTo(p1_2d.x, p1_2d.y + p1_3d.z); ctx.closePath();
                 ctx.fill();
+
                 if (patterns['telha']) { ctx.fillStyle = patterns['telha']; ctx.fill(); }
+
                 ctx.fillStyle = overlay; ctx.fill();
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
             };
@@ -822,7 +836,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
                 ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
                 ctx.fillStyle = roofColor; ctx.fill();
+                
                 if (patterns['telha']) { ctx.fillStyle = patterns['telha']; ctx.fill(); }
+
                 ctx.fillStyle = overlay; ctx.fill();
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
                 ctx.strokeStyle = overlay; ctx.lineWidth = 1; ctx.stroke();
@@ -836,6 +852,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
             drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
             drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+            
             ctx.restore();
         }
     }
@@ -882,7 +899,7 @@ function drawIsometricGrid() {
     ctx.scale(cameraZoom, cameraZoom);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
-    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
+    const currentEraseMode = isDragging ? (dragStartNode?.erase || false) : isErasing;
 
     let renderQueue = [];
     for (const f of floors) {
@@ -913,7 +930,9 @@ function drawIsometricGrid() {
 
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
-    const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
+    
+    // Blindagem final
+    const currentEraseMode = (isDragging && dragStartNode) ? dragStartNode.erase : isErasing;
 
     if (!isCutaway) return; 
 
