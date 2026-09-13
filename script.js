@@ -77,10 +77,11 @@ function defineTilePath(pNorte, pLeste, pSul, pOeste) {
     ctx.closePath();
 }
 
-function drawFlatWall(p1, p2, height, color) {
+// A SOLUÇÃO: A parede agora aceita z1 e z2 para inclinar a sua base e repousar sobre o telhado!
+function drawFlatWall(p1, p2, height, color, z1 = 0, z2 = 0) {
     ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y); 
-    ctx.lineTo(p2.x, p2.y); 
+    ctx.moveTo(p1.x, p1.y - z1); 
+    ctx.lineTo(p2.x, p2.y - z2); 
     ctx.lineTo(p2.x, p2.y - height); 
     ctx.lineTo(p1.x, p1.y - height); 
     ctx.closePath();
@@ -216,13 +217,11 @@ function isWallSupported(r, c, side) {
     return false;
 }
 
-// A CORREÇÃO DE OURO DA SUA ANÁLISE!
 function hasStructureAbove(fIndex, r, c) {
     const upper = mapData[fIndex + 1];
     if (!upper) return false;
     
-    // Agora o telhado só é cortado se a célula de cima for realmente o interior de uma sala ou tiver piso!
-    // Removemos a verificação de paredes, impedindo que a "grid ao redor da parede superior" bloqueie o telhado de baixo.
+    // A sua sacada de mestre: Avalia apenas se há piso, nunca a parede fina ao redor!
     if (upper[r][c].floor > 0) return true;
     if (enclosedCache[`${fIndex + 1},${r},${c}`]) return true;
     
@@ -373,13 +372,43 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
         let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
         let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
-        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
-        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
-
         let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
         let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
-        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
-        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
+
+        // O CORTE DE BASE: Calcula a inclinação do telhado inferior para que a parede descanse sobre ele
+        let zL_W = 0, zL_N = 0, zR_N = 0, zR_E = 0, zWE_W = 0, zWE_E = 0, zNS_N = 0, zNS_S = 0;
+        
+        if (fIndex > 0) {
+            let fB = fIndex - 1; // Floor Below (Andar de baixo)
+            let checkR = (r, c) => {
+                if (r < 0 || r >= 10 || c < 0 || c >= 10) return false;
+                let ind = enclosedCache[`${fB},${r},${c}`] || mapData[fB][r][c].floor > 0;
+                return ind && !hasStructureAbove(fB, r, c);
+            };
+            
+            if (hL > 0 && (checkR(row, col) || checkR(row, col-1))) {
+                zL_W = Math.min(hL, getRoofZ(fB, row+1, col, roofPitch));
+                zL_N = Math.min(hL, getRoofZ(fB, row, col, roofPitch));
+            }
+            if (hR > 0 && (checkR(row, col) || checkR(row-1, col))) {
+                zR_N = Math.min(hR, getRoofZ(fB, row, col, roofPitch));
+                zR_E = Math.min(hR, getRoofZ(fB, row, col+1, roofPitch));
+            }
+            if (hWE > 0 && checkR(row, col)) {
+                zWE_W = Math.min(hWE, getRoofZ(fB, row+1, col, roofPitch));
+                zWE_E = Math.min(hWE, getRoofZ(fB, row, col+1, roofPitch));
+            }
+            if (hNS > 0 && checkR(row, col)) {
+                zNS_N = Math.min(hNS, getRoofZ(fB, row, col, roofPitch));
+                zNS_S = Math.min(hNS, getRoofZ(fB, row+1, col+1, roofPitch));
+            }
+        }
+
+        // As paredes agora recebem Z1 e Z2 e são moldadas perfeitamente para repousar no telhado!
+        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c', zL_W, zL_N); 
+        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935', zR_N, zR_E); 
+        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f', zWE_W, zWE_E); 
+        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828', zNS_N, zNS_S); 
 
         if (targetMap[row][col].column === 1) {
             let colH = applyCutaway ? cutawayHeight : blockHeight;
