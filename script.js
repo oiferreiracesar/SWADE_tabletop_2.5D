@@ -263,7 +263,11 @@ function drawFlatWall(p1, p2, height, color, textura, face) {
         ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
         ctx.lineTo(p2.x, p2.y - height); ctx.lineTo(p1.x, p1.y - height);
         ctx.closePath();
-        ctx.strokeStyle = '#222'; ctx.lineWidth = 1; ctx.stroke();
+        // Com textura o contorno grosso vira moldura: a imagem ja separa uma face
+        // da outra. No modo cru ele e o unico limite, entao continua forte.
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 0.6 / camZoom;
+        ctx.stroke();
         return;
     }
     ctx.beginPath();
@@ -592,6 +596,16 @@ function isFloorSupported(r, c) {
 
 function isWallSupported(r, c, side) {
     if (currentFloor <= 0) return true;
+
+    // A laje sustenta o que se apoia nela: se ha chao de um dos lados da aresta,
+    // neste mesmo andar, a parede (ou a cerca) pode subir ali. E o que permite
+    // cercar a sacada inteira, inclusive a parte em balanco.
+    const temChao = (vr, vc) => vr >= 0 && vr < GRADE && vc >= 0 && vc < GRADE
+                               && map[vr][vc].floor > 0;
+    if (temChao(r, c)) return true;
+    if (side === 'L' && temChao(r, c - 1)) return true;
+    if (side === 'R' && temChao(r - 1, c)) return true;
+
     if (!mapData[currentFloor - 1]) return false;
     const lower = mapData[currentFloor - 1][r][c];
     if (side === 'L' && lower.wallL > 0) return true;
@@ -698,6 +712,92 @@ function desenharVertice(v, cor, raio) {
     ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 1; ctx.stroke();
 }
 
+
+// ===================== ROTACAO DA CAMERA =====================
+//
+// Girar a vista 90 graus e, na pratica, girar o tabuleiro sob a camera. E a
+// abordagem mais segura aqui: o sombreamento, as aguas do telhado, o meio-
+// ladrilho e a conversao do clique sao todos definidos em relacao a TELA
+// (oeste e a face escura, norte e a clara). Se eu girasse so o desenho, cada
+// uma dessas quatro pecas precisaria de um remapeamento proprio -- quatro
+// chances de errar. Girando o dado, tudo continua valendo como esta, e sao os
+// dados que passam a estar na posicao nova.
+//
+// A parede mora numa ARESTA, entao o giro e feito pelos VERTICES da aresta:
+// gira os dois cantos e pergunta de novo em que celula e lado eles caem. E a
+// mesma conta que a ferramenta ponto A -> B ja usa.
+
+let rotacao = 0;   // 0, 1, 2, 3 -- quartos de volta no sentido horario
+
+function girarVertice(v) {
+    return { row: v.col, col: GRADE - v.row };
+}
+
+// Quais dois cantos formam cada aresta de uma celula.
+function verticesDaAresta(r, c, lado) {
+    if (lado === 'L')  return [{ row: r + 1, col: c }, { row: r, col: c }];
+    if (lado === 'R')  return [{ row: r, col: c }, { row: r, col: c + 1 }];
+    if (lado === 'WE') return [{ row: r + 1, col: c }, { row: r, col: c + 1 }];
+    return [{ row: r, col: c }, { row: r + 1, col: c + 1 }];   // NS
+}
+
+// O caminho de volta: dois cantos vizinhos dizem em que celula e lado a parede mora.
+function arestaDosVertices(a, b) {
+    const dR = b.row - a.row, dC = b.col - a.col;
+    if (dC === 0) return { row: Math.min(a.row, b.row), col: a.col, lado: 'L' };
+    if (dR === 0) return { row: a.row, col: Math.min(a.col, b.col), lado: 'R' };
+    return { row: Math.min(a.row, b.row), col: Math.min(a.col, b.col),
+             lado: (dR === dC) ? 'NS' : 'WE' };
+}
+
+function girarAndar(m) {
+    const novo = createEmptyMap();
+    const campos = ['floor', 'pisoFora', 'column', 'texPiso', 'texPisoFora',
+                    'texTelhado', 'texColuna'];
+
+    for (let r = 0; r < GRADE; r++) {
+        for (let c = 0; c < GRADE; c++) {
+            const destino = novo[c][GRADE - 1 - r];
+            for (const campo of campos) destino[campo] = m[r][c][campo];
+        }
+    }
+
+    // As paredes viajam pela aresta, nao pela celula.
+    for (let r = 0; r < BORDA; r++) {
+        for (let c = 0; c < BORDA; c++) {
+            for (const lado of ['L', 'R', 'WE', 'NS']) {
+                const altura = m[r][c]['wall' + lado];
+                if (!altura) continue;
+                const [a, b] = verticesDaAresta(r, c, lado);
+                const nova = arestaDosVertices(girarVertice(a), girarVertice(b));
+                if (nova.row < 0 || nova.row >= BORDA || nova.col < 0 || nova.col >= BORDA) continue;
+                const alvo = novo[nova.row][nova.col];
+                alvo['wall' + nova.lado] = altura;
+                alvo['cerca' + nova.lado] = m[r][c]['cerca' + lado];
+                alvo['tex' + nova.lado] = m[r][c]['tex' + lado];
+            }
+        }
+    }
+    return novo;
+}
+
+function girarCamera(sentido) {
+    saveState();
+    const voltas = sentido > 0 ? 1 : 3;      // anti-horario = tres quartos de volta
+    for (let i = 0; i < voltas; i++) {
+        for (const f of Object.keys(mapData).map(Number)) {
+            mapData[f] = girarAndar(mapData[f]);
+        }
+        rotacao = (rotacao + 1) % 4;
+    }
+    map = mapData[currentFloor];
+    isDragging = false; dragStartNode = null;
+    verticeA = null; verticeB = null;
+    precalculateRooms();
+    updateUI();
+    updatePreview();
+    drawIsometricGrid();
+}
 
 // ===================== CERCA E SALAS PRE-MOLDADAS =====================
 
@@ -892,8 +992,13 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
         if (shouldDrawGrid) {
             tracarPoligono(dentroPts);
-            ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555');
+            const texturado = targetMap[row][col].texPiso && temPiso;
+            ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)'
+                            : (isGhost ? 'rgba(85, 85, 85, 0.15)'
+                            : (texturado ? 'rgba(0,0,0,0.22)' : '#555'));
+            ctx.lineWidth = texturado ? 0.6 / camZoom : 1;
             ctx.stroke();
+            ctx.lineWidth = 1;
         }
 
         if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
@@ -1169,7 +1274,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 // ser secreta. Acima, os andares se empilham normalmente.
 function andarVisivel(f) {
     if (currentFloor < 0) return f === currentFloor;
-    return f >= 0;
+    // Nada acima do andar em que voce esta. Antes a laje do andar de cima ficava
+    // desenhada por cima do terreo: dava para pintar o chao, mas nao dava para
+    // VER -- parecia que o pincel tinha parado de funcionar.
+    return f >= 0 && f <= currentFloor;
 }
 
 function drawIsometricGrid() {
@@ -1729,6 +1837,9 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
+    if (e.key === 'q' || e.key === 'Q') { girarCamera(-1); return; }
+    if (e.key === 'e' || e.key === 'E') { girarCamera(1); return; }
+
     if (e.key === 'c' || e.key === 'C') {
         isCutaway = !isCutaway;
         updateUI();
@@ -1785,6 +1896,9 @@ document.getElementById('btnRoomOct').addEventListener('click', () => { currentB
 document.getElementById('btnCerca').addEventListener('click', () => { currentBrush = 9; updateUI(); });
 document.getElementById('btnPaintRoof').addEventListener('click', () => { currentBrush = 7; updateUI(); montarPaletaTexturas(); });
 document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); montarPaletaTexturas(); });
+
+document.getElementById('btnRotL').addEventListener('click', () => girarCamera(-1));
+document.getElementById('btnRotR').addEventListener('click', () => girarCamera(1));
 
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 

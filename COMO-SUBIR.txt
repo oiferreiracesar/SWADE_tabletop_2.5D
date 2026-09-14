@@ -1,0 +1,9 @@
+COMO SUBIR ESTA ATUALIZACAO NO GITHUB (pelo Chrome)
+
+Desta vez mudaram so TRES arquivos. Nenhuma textura nova.
+
+1. Abra github.com/oiferreiracesar/SWADE_tabletop_2.5D no CHROME.
+2. "Add file" -> "Upload files".
+3. Arraste os tres arquivos desta pasta para o navegador.
+4. Mensagem: Giro da camera, cerca na laje e contorno fino
+5. "Commit changes".
