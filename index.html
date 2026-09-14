@@ -50,6 +50,8 @@
         .texture-btn.selected { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
         .texture-label { font-size: 0.75rem; text-align: center; color: #cbd5e1; margin-top: 4px; }
         .texture-wrapper { display: flex; flex-direction: column; }
+        .texture-categoria { grid-column: 1 / -1; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 3px; margin-top: 6px; }
 
         .color-picker { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 8px; }
         .color-picker input[type="color"] { cursor: pointer; border: none; border-radius: 4px; width: 30px; height: 30px; padding: 0; background: none; }
@@ -92,14 +94,18 @@
         </div>
 
         <h2>Acabamento</h2>
+        <div style="font-size:0.75rem; color:#94a3b8; margin:-8px 0 10px;">
+            O Piso (1) já constrói com a textura escolhida. Aqui ficam as superfícies que não se constroem clicando.
+        </div>
         <div class="tool-group">
-            <button id="btnPaintFloor">Pintar Chão (7)</button>
-            <button id="btnPaintWall">Pintar Parede (8)</button>
+            <button id="btnPaintRoof">Pintar Telhado (7)</button>
+            <button id="btnPaintWall">Pintar Parede, Cerca e Coluna (8)</button>
         </div>
 
         <h2>Biblioteca de Texturas</h2>
         <div style="font-size:0.78rem; color:#94a3b8; margin-bottom:8px;">
-            Ativa: <strong id="texturaAtiva">nenhuma</strong> — a paleta segue a ferramenta (7 chão, 8 parede).
+            Ativa: <strong id="texturaAtiva">nenhuma</strong> — a paleta segue a ferramenta: chão no Piso (1), telha no (7), parede no (8).<br>
+            Shift pinta o cômodo inteiro · Ctrl remove a textura.
         </div>
         <div class="texture-grid" id="texturePalette"></div>
 

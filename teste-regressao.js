@@ -774,57 +774,121 @@ function checa(nome, passou, detalhe = '') {
         `clique do lado de fora pinta o lado de fora=${metadeFora.foraPinta} · ` +
         `um não apaga o outro=${metadeFora.dentroNaoSumiu}`);
 
-  // T33 — pintar chão e parede: o acabamento entra sem mexer na construção
+  // T33 — acabamento: o Piso já nasce texturizado, o 7 pinta o telhado do cômodo
+  // inteiro e o 8 cobre parede, cerca e coluna
   const pintura = await page.evaluate(async () => {
-    // espera o catálogo chegar
     for (let i = 0; i < 40 && catalogoTexturas.length === 0; i++) await new Promise(r => setTimeout(r, 50));
 
     const cv = document.getElementById('gameCanvas'), rec = cv.getBoundingClientRect();
     const pos = (row, col) => { const g = gridToScreen(row, col), t = worldParaTela(g.x, g.y);
       return { x: rec.left + t.x, y: rec.top + t.y }; };
-    const clique = (pt) => ['mousemove','mousedown','mouseup'].forEach(t =>
-      cv.dispatchEvent(new MouseEvent(t, { clientX: pt.x, clientY: pt.y, bubbles: true })));
+    const ev = (t, pt, extra) => cv.dispatchEvent(new MouseEvent(t,
+      Object.assign({ clientX: pt.x, clientY: pt.y, bubbles: true }, extra || {})));
+    const clique = (pt, extra) => { ev('mousemove', pt, extra); ev('mousedown', pt, extra); ev('mouseup', pt, extra); };
 
     mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
     definirAlturaParede(48); isCutaway = true;
     for (let r = 2; r <= 5; r++) { map[r][2].wallL = 48; map[r][6].wallL = 48; }
     for (let c = 2; c <= 5; c++) { map[2][c].wallR = 48; map[6][c].wallR = 48; }
-    for (let r = 2; r <= 5; r++) for (let c = 2; c <= 5; c++) map[r][c].floor = 1;
+    map[8][8].column = 48;
     precalculateRooms();
 
     const piso = catalogoTexturas.find(t => t.grupo === 'piso');
     const parede = catalogoTexturas.find(t => t.grupo === 'parede');
+    const telha = catalogoTexturas.find(t => t.grupo === 'telhado');
 
-    // pintar chão
-    document.getElementById('btnPaintFloor').click();
+    // 1) construir chão já aplica a textura escolhida
+    document.getElementById('btnPiso').click();
     texturaSelecionada.piso = piso.id;
     clique(pos(4.5, 4.5));
-    const chaoPintado = map[4][4].texPiso === piso.id;
-    const naoMexeuNaConstrucao = map[4][4].floor === 1;
+    const chaoNasceTexturizado = map[4][4].floor === 1 && map[4][4].texPiso === piso.id;
 
-    // pintar chão onde NÃO há chão não inventa piso
-    clique(pos(9.2, 9.2));
-    const semChaoFicaSemTextura = map[9][9].texPiso === null && map[9][9].floor === 0;
+    // Shift preenche o cômodo já texturizado
+    ev('mousemove', pos(3.5, 3.5));
+    ev('mousedown', pos(3.5, 3.5), { shiftKey: true });
+    ev('mouseup', pos(3.5, 3.5));
+    let texturados = 0;
+    for (let r = 2; r <= 5; r++) for (let c = 2; c <= 5; c++) if (map[r][c].texPiso === piso.id) texturados++;
 
-    // pintar parede: aresta oeste da célula (4,2)
+    // 2) telhado: um clique pinta o cômodo inteiro
+    document.getElementById('btnPaintRoof').click();
+    texturaSelecionada.telhado = telha.id;
+    clique(pos(4.5, 4.5));
+    let telhados = 0;
+    for (let r = 2; r <= 5; r++) for (let c = 2; c <= 5; c++) if (map[r][c].texTelhado === telha.id) telhados++;
+    const grupoTelhado = grupoDaFerramenta() === 'telhado';
+
+    // 3) parede pelo clique, e Shift cobrindo o cômodo todo
     document.getElementById('btnPaintWall').click();
     texturaSelecionada.parede = parede.id;
     clique(pos(4.2, 2.1));
     const paredePintada = map[4][2].texL === parede.id;
-    const paredeContinuaDePe = map[4][2].wallL === 48;
+    ev('mousemove', pos(3.5, 3.5));
+    ev('mousedown', pos(3.5, 3.5), { shiftKey: true });
+    ev('mouseup', pos(3.5, 3.5));
+    let arestas = 0;
+    for (let r = 0; r < 11; r++) for (let c = 0; c < 11; c++) {
+      if (map[r][c].texL === parede.id) arestas++;
+      if (map[r][c].texR === parede.id) arestas++;
+    }
 
-    // a paleta mostra o grupo da ferramenta ativa
-    const botoes = document.querySelectorAll('#texturePalette .texture-btn').length;
+    // 4) coluna aceita textura
+    clique(pos(8.2, 8.2));
+    const colunaPintada = map[8][8].texColuna === parede.id;
 
-    return { catalogo: catalogoTexturas.length >= 20, chaoPintado, naoMexeuNaConstrucao,
-             semChaoFicaSemTextura, paredePintada, paredeContinuaDePe, paletaCheia: botoes > 1 };
+    // 5) a construção não foi alterada por nenhuma pintura
+    const construcaoIntacta = map[4][2].wallL === 48 && map[8][8].column === 48;
+
+    return { catalogo: catalogoTexturas.length >= 40, chaoNasceTexturizado,
+             shiftTexturiza: texturados === 16, telhadoDoComodo: telhados === 16,
+             grupoTelhado, paredePintada, paredeShift: arestas >= 16,
+             colunaPintada, construcaoIntacta };
   });
   const pintOk = Object.values(pintura).every(Boolean);
-  checa('Pintar chão e parede aplicam textura sem alterar a construção', pintOk,
-        `catálogo carregado=${pintura.catalogo} · chão pintado=${pintura.chaoPintado} · ` +
-        `parede pintada=${pintura.paredePintada} · construção intacta=` +
-        `${pintura.naoMexeuNaConstrucao && pintura.paredeContinuaDePe} · ` +
-        `sem chão não recebe textura=${pintura.semChaoFicaSemTextura} · paleta preenchida=${pintura.paletaCheia}`);
+  checa('Acabamento: piso nasce texturizado, 7 pinta telhado, 8 pinta parede/cerca/coluna', pintOk,
+        `chão já nasce com a textura=${pintura.chaoNasceTexturizado} · Shift texturiza o cômodo=${pintura.shiftTexturiza} · ` +
+        `telhado do cômodo inteiro num clique=${pintura.telhadoDoComodo} · parede no clique=${pintura.paredePintada} · ` +
+        `Shift cobre as paredes do cômodo=${pintura.paredeShift} · coluna=${pintura.colunaPintada} · ` +
+        `construção intacta=${pintura.construcaoIntacta}`);
+
+  // T34 — as duas correções deste reteste: marcador A/B na cerca e a laje que
+  // para nas paredes do andar de baixo em vez de seguir o chão pintado
+  const reteste = await page.evaluate(() => {
+    const cv = document.getElementById('gameCanvas'), rec = cv.getBoundingClientRect();
+    const pos = (row, col) => { const g = gridToScreen(row, col), t = worldParaTela(g.x, g.y);
+      return { x: rec.left + t.x, y: rec.top + t.y }; };
+    const ev = (t, pt, extra) => cv.dispatchEvent(new MouseEvent(t,
+      Object.assign({ clientX: pt.x, clientY: pt.y, bubbles: true }, extra || {})));
+
+    // marcador da cerca: o canto sob o mouse existe com a ferramenta 9
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    definirAlturaParede(48); isCutaway = true;
+    document.getElementById('btnCerca').click();
+    verticeHover = null;
+    ev('mousemove', pos(3, 3));
+    const cercaMostraOCanto = !!verticeHover;
+
+    // laje: térreo TODO pintado, mas com uma sala de paredes no meio
+    mapData = { 0: createEmptyMap(), 1: createEmptyMap() }; map = mapData[0];
+    for (let r = 0; r < 10; r++) for (let c = 0; c < 10; c++) map[r][c].floor = 1;
+    for (let r = 2; r <= 5; r++) { map[r][2].wallL = 48; map[r][6].wallL = 48; }
+    for (let c = 2; c <= 5; c++) { map[2][c].wallR = 48; map[6][c].wallR = 48; }
+    changeFloor(1);
+    document.getElementById('btnPiso').click();
+    ev('mousemove', pos(3.5, 3.5));
+    ev('mousedown', pos(3.5, 3.5), { shiftKey: true });
+    ev('mouseup', pos(3.5, 3.5));
+
+    let dentro = 0, fora = 0;
+    for (let r = 0; r < 10; r++) for (let c = 0; c < 10; c++) if (mapData[1][r][c].floor > 0) {
+      (r >= 2 && r <= 5 && c >= 2 && c <= 5) ? dentro++ : fora++;
+    }
+    return { cercaMostraOCanto, lajeSoNaSala: dentro === 16 && fora === 0, dentro, fora };
+  });
+  const retesteOk = reteste.cercaMostraOCanto && reteste.lajeSoNaSala;
+  checa('Cerca mostra o ponto A/B e a laje para nas paredes de baixo', retesteOk,
+        `cerca marca o canto sob o mouse=${reteste.cercaMostraOCanto} · ` +
+        `laje cobriu ${reteste.dentro} ladrilhos da sala e ${reteste.fora} fora dela (esperado 16 e 0)`);
 
   await browser.close();
   srv.close();

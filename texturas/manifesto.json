@@ -234,6 +234,42 @@
    "nome": "Metal 2",
    "grupo": "parede",
    "arquivo": "texturas/metal-02.webp"
+  },
+  {
+   "id": "telha-01",
+   "nome": "Telha 1",
+   "grupo": "telhado",
+   "arquivo": "texturas/telha-01.webp"
+  },
+  {
+   "id": "telha-02",
+   "nome": "Telha 2",
+   "grupo": "telhado",
+   "arquivo": "texturas/telha-02.webp"
+  },
+  {
+   "id": "telha-03",
+   "nome": "Telha 3",
+   "grupo": "telhado",
+   "arquivo": "texturas/telha-03.webp"
+  },
+  {
+   "id": "telha-04",
+   "nome": "Telha 4",
+   "grupo": "telhado",
+   "arquivo": "texturas/telha-04.webp"
+  },
+  {
+   "id": "telha-05",
+   "nome": "Telha 5",
+   "grupo": "telhado",
+   "arquivo": "texturas/telha-05.webp"
+  },
+  {
+   "id": "telha-06",
+   "nome": "Telha 6",
+   "grupo": "telhado",
+   "arquivo": "texturas/telha-06.webp"
   }
  ]
 }

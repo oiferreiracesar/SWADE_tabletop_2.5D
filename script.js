@@ -69,7 +69,7 @@ let surfaceColor = '#1e293b';
 // nunca fica um buraco esperando download.
 let catalogoTexturas = [];
 const imagensTextura = {};
-let texturaSelecionada = { piso: null, parede: null };
+let texturaSelecionada = { piso: null, parede: null, telhado: null };
 
 function imagemDaTextura(id) {
     if (!id) return null;
@@ -103,6 +103,38 @@ function pintarComTextura(img, p0, u, v, escurecer) {
         ctx.closePath();
         ctx.fill();
     }
+}
+
+// Projeta um triangulo da imagem num triangulo da tela. E isso que faz a telha
+// acompanhar a INCLINACAO da agua: cada fatia do telhado carrega as coordenadas
+// do seu pedaco da imagem, em vez de receber a imagem achatada no quadro da
+// celula -- que era o motivo de a telha sair esticada e desencontrada.
+function desenharTrianguloTexturizado(img, p1, p2, p3, uv1, uv2, uv3) {
+    const L = img.width, A = img.height;
+    const u1 = uv1.u * L, v1 = uv1.v * A;
+    const u2 = uv2.u * L, v2 = uv2.v * A;
+    const u3 = uv3.u * L, v3 = uv3.v * A;
+
+    const den = u1 * (v3 - v2) - u2 * (v3 - v1) + u3 * (v2 - v1);
+    if (!den) return false;
+
+    const a = (p1.x * (v3 - v2) - p2.x * (v3 - v1) + p3.x * (v2 - v1)) / den;
+    const b = (p1.y * (v3 - v2) - p2.y * (v3 - v1) + p3.y * (v2 - v1)) / den;
+    const c = (u1 * (p3.x - p2.x) - u2 * (p3.x - p1.x) + u3 * (p2.x - p1.x)) / den;
+    const d = (u1 * (p3.y - p2.y) - u2 * (p3.y - p1.y) + u3 * (p2.y - p1.y)) / den;
+    const e = (u1 * (v3 * p2.x - v2 * p3.x) - u2 * (v3 * p1.x - v1 * p3.x)
+             + u3 * (v2 * p1.x - v1 * p2.x)) / den;
+    const f = (u1 * (v3 * p2.y - v2 * p3.y) - u2 * (v3 * p1.y - v1 * p3.y)
+             + u3 * (v2 * p1.y - v1 * p2.y)) / den;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
+    ctx.closePath(); ctx.clip();
+    ctx.transform(a, b, c, d, e, f);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+    return true;
 }
 
 // Cada face recebe um veu diferente para a parede nao virar um bloco chapado.
@@ -184,7 +216,8 @@ function createEmptyMap() {
             newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0,
                              cercaL: 0, cercaR: 0, cercaWE: 0, cercaNS: 0, pisoFora: 0,
                              texPiso: null, texPisoFora: null,
-                             texL: null, texR: null, texWE: null, texNS: null }; 
+                             texL: null, texR: null, texWE: null, texNS: null,
+                             texTelhado: null, texColuna: null }; 
         }
     }
     return newMap;
@@ -894,11 +927,23 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
             ctx.beginPath(); ctx.moveTo(cx, cy - colH - 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx - 6, cy - colH); ctx.closePath(); ctx.fill(); ctx.stroke();
             
+            const imgColuna = isGhost ? null : imagemDaTextura(targetMap[row][col].texColuna);
+
             ctx.fillStyle = isGhost ? 'rgba(100, 100, 100, 0.5)' : '#777';
-            ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
-            
+            ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath();
+            if (imgColuna) { ctx.save(); ctx.clip();
+                pintarComTextura(imgColuna, { x: cx - 6, y: cy - colH }, { x: 6, y: 4 }, { x: 0, y: colH }, 'rgba(0,0,0,0.28)');
+                ctx.restore(); ctx.beginPath(); ctx.moveTo(cx - 6, cy - colH); ctx.lineTo(cx, cy - colH + 4); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 6, cy); ctx.closePath(); }
+            else ctx.fill();
+            ctx.stroke();
+
             ctx.fillStyle = isGhost ? 'rgba(110, 110, 110, 0.5)' : '#888';
-            ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath();
+            if (imgColuna) { ctx.save(); ctx.clip();
+                pintarComTextura(imgColuna, { x: cx, y: cy - colH + 4 }, { x: 6, y: -4 }, { x: 0, y: colH }, 'rgba(255,255,255,0.05)');
+                ctx.restore(); ctx.beginPath(); ctx.moveTo(cx, cy - colH + 4); ctx.lineTo(cx + 6, cy - colH); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 4); ctx.closePath(); }
+            else ctx.fill();
+            ctx.stroke();
         }
     } 
 
@@ -1024,14 +1069,30 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 drawSkirt(q2[0], q2[1], q2[2], q2[3], 'rgba(0,0,0,0.25)');
             }
 
+            // A textura do telhado e a do cômodo: cada fatia leva as coordenadas do
+            // seu pedaco da imagem, tiradas da posicao na grade.
+            const imgTelhado = isGhost ? null : imagemDaTextura(targetMap[row][col].texTelhado);
+            const uvDe = (p3d) => ({ u: p3d.y - col, v: p3d.x - row });
+
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
                 if (overlay === 'rgba(0,0,0,0)') return;
                 ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath();
                 ctx.fillStyle = roofColor; ctx.fill();
+                if (imgTelhado) {
+                    desenharTrianguloTexturizado(imgTelhado, p1, p2, p3,
+                                                 uvDe(p1_3d), uvDe(p2_3d), uvDe(p3_3d));
+                    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+                    ctx.lineTo(p3.x, p3.y); ctx.closePath();
+                }
                 ctx.fillStyle = overlay; ctx.fill();
-                ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
-                ctx.strokeStyle = overlay;   ctx.lineWidth = 1; ctx.stroke();
+                // Os contornos existiam para disfarcar a costura entre as fatias na
+                // cor chapada. Com textura eles viram uma teia de riscos por cima
+                // do telhado -- entao so entram quando nao ha imagem.
+                if (!imgTelhado) {
+                    ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
+                    ctx.strokeStyle = overlay;   ctx.lineWidth = 1; ctx.stroke();
+                }
             };
 
             for (const i of indices) {
@@ -1148,8 +1209,8 @@ function drawIsometricGrid() {
         renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 1);
     }
 
-    // Pontos A e B da ferramenta de parede, sempre por cima da cena.
-    if (currentBrush === 2) {
+    // Pontos A e B da ferramenta de parede -- e da cerca, que usa o mesmo traco.
+    if (currentBrush === 2 || currentBrush === 9) {
         const corA = currentEraseMode ? '#ff6b6b' : '#4ade80';
         if (isDragging && verticeA) {
             desenharVertice(verticeA, corA, 7);
@@ -1173,6 +1234,48 @@ function metadeSobOMouse(r, c) {
     return null;
 }
 
+// As celulas ligadas a esta, sem atravessar parede. E o mesmo caminho do Shift,
+// reaproveitado para pintar um cômodo inteiro de uma vez.
+function celulasDoComodo(r0, c0) {
+    const fila = [{ r: r0, c: c0 }];
+    const vistos = new Set([`${r0},${c0}`]);
+    const saida = [];
+    while (fila.length) {
+        const { r, c } = fila.shift();
+        saida.push({ r, c });
+        const cel = map[r][c];
+        if (cel.wallWE > 0 || cel.wallNS > 0) continue;
+        const passo = (temParede, vr, vc) => {
+            if (temParede) return;
+            if (vr < 0 || vr >= GRADE || vc < 0 || vc >= GRADE) return;
+            if (vistos.has(`${vr},${vc}`)) return;
+            vistos.add(`${vr},${vc}`);
+            fila.push({ r: vr, c: vc });
+        };
+        passo(cel.wallL > 0, r, c - 1);
+        passo(cel.wallR > 0, r - 1, c);
+        passo(map[r][c + 1].wallL > 0, r, c + 1);
+        passo(map[r + 1][c].wallR > 0, r + 1, c);
+        if (saida.length > GRADE * GRADE) break;
+    }
+    return saida;
+}
+
+// Todas as arestas com parede (ou cerca) que cercam um conjunto de celulas.
+function arestasDoComodo(celulas) {
+    const arestas = [];
+    for (const { r, c } of celulas) {
+        const cel = map[r][c];
+        if (cel.wallL > 0) arestas.push({ r, c, lado: 'L' });
+        if (cel.wallR > 0) arestas.push({ r, c, lado: 'R' });
+        if (cel.wallWE > 0) arestas.push({ r, c, lado: 'WE' });
+        if (cel.wallNS > 0) arestas.push({ r, c, lado: 'NS' });
+        if (map[r][c + 1].wallL > 0) arestas.push({ r, c: c + 1, lado: 'L' });
+        if (map[r + 1][c].wallR > 0) arestas.push({ r: r + 1, c, lado: 'R' });
+    }
+    return arestas;
+}
+
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= GRADE || hoverCol < 0 || hoverCol >= GRADE) return;
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
@@ -1191,36 +1294,41 @@ function applySmartBrush() {
         if (ladoDoMouse) {
             const dentro = metadeCache[`${currentFloor},${hoverRow},${hoverCol}`];
             const ehDeFora = dentro && ladoDoMouse !== dentro;
-            if (ehDeFora) cel.pisoFora = currentEraseMode ? 0 : 1;
-            else          cel.floor    = currentEraseMode ? 0 : 1;
+            if (ehDeFora) {
+                cel.pisoFora = currentEraseMode ? 0 : 1;
+                cel.texPisoFora = currentEraseMode ? null : texturaSelecionada.piso;
+            } else {
+                cel.floor = currentEraseMode ? 0 : 1;
+                cel.texPiso = currentEraseMode ? null : texturaSelecionada.piso;
+            }
             return;
         }
 
+        // Construir ja aplica o acabamento escolhido: o chao nasce com a textura
+        // da paleta, em vez de sair cinza e pedir uma segunda passada.
         cel.floor = currentEraseMode ? 0 : 1;
-        if (currentEraseMode) cel.pisoFora = 0;
+        cel.texPiso = currentEraseMode ? null : texturaSelecionada.piso;
+        if (currentEraseMode) { cel.pisoFora = 0; cel.texPisoFora = null; }
         return; 
     }
     
-    // PINTAR CHAO (7): troca so o acabamento, nunca constroi nem apaga.
+    // PINTAR TELHADO (7): a agua e do cômodo inteiro, nao de um ladrilho, entao
+    // um clique pinta o cômodo sob o cursor de uma vez.
     if (currentBrush === 7) {
-        const cel = map[hoverRow][hoverCol];
-        const nova = currentEraseMode ? null : texturaSelecionada.piso;
-        const ladoDoMouse = metadeSobOMouse(hoverRow, hoverCol);
-        const dentro = metadeCache[`${currentFloor},${hoverRow},${hoverCol}`];
-        if (ladoDoMouse && dentro && ladoDoMouse !== dentro) {
-            if (cel.pisoFora > 0) cel.texPisoFora = nova;
-        } else if (cel.floor > 0) {
-            cel.texPiso = nova;
-        }
+        const nova = currentEraseMode ? null : texturaSelecionada.telhado;
+        celulasDoComodo(hoverRow, hoverCol).forEach(({ r, c }) => { map[r][c].texTelhado = nova; });
         return;
     }
 
-    // PINTAR PAREDE (8): a aresta sob o cursor, do mesmo jeito que a parede simples.
+    // PINTAR PAREDE (8): parede, cerca e coluna -- tudo que fica de pe.
     if (currentBrush === 8) {
         const cel = map[hoverRow][hoverCol];
         const nova = currentEraseMode ? null : texturaSelecionada.parede;
+
+        if (cel.column > 0 && hoverQuadrant === 'NW') { cel.texColuna = nova; return; }
         if (cel.wallWE > 0) { cel.texWE = nova; return; }
         if (cel.wallNS > 0) { cel.texNS = nova; return; }
+
         let aRow = hoverRow, aCol = hoverCol, lado = 'L';
         if (hoverQuadrant === 'NE') lado = 'R';
         else if (hoverQuadrant === 'SW') { aRow += 1; lado = 'R'; }
@@ -1229,6 +1337,7 @@ function applySmartBrush() {
         const alvo = map[aRow][aCol];
         if (lado === 'L' && alvo.wallL > 0) alvo.texL = nova;
         else if (lado === 'R' && alvo.wallR > 0) alvo.texR = nova;
+        else if (cel.column > 0) cel.texColuna = nova;
         return;
     }
 
@@ -1278,10 +1387,16 @@ function changeFloor(delta) {
 
 // A paleta mostra o que serve para a ferramenta ativa: chao com chao, parede
 // com parede. Antes esta grade existia no HTML e vivia vazia.
+function grupoDaFerramenta() {
+    if (currentBrush === 8) return 'parede';
+    if (currentBrush === 7) return 'telhado';
+    return 'piso';
+}
+
 function montarPaletaTexturas() {
     const grade = document.getElementById('texturePalette');
     if (!grade) return;
-    const grupo = currentBrush === 8 ? 'parede' : 'piso';
+    const grupo = grupoDaFerramenta();
     grade.innerHTML = '';
 
     const limpar = document.createElement('div');
@@ -1296,7 +1411,28 @@ function montarPaletaTexturas() {
     limpar.appendChild(botaoLimpar); limpar.appendChild(rotuloLimpar);
     grade.appendChild(limpar);
 
+    // Agrupadas por categoria: procurar "tijolo" no meio de quarenta quadradinhos
+    // sem nome nao e escolher, e adivinhar.
+    const categorias = [];
     catalogoTexturas.filter(t => t.grupo === grupo).forEach(t => {
+        const nomeCategoria = t.nome.replace(/\s+\d+$/, '');
+        let cat = categorias.find(c => c.nome === nomeCategoria);
+        if (!cat) { cat = { nome: nomeCategoria, itens: [] }; categorias.push(cat); }
+        cat.itens.push(t);
+    });
+
+    categorias.forEach(cat => {
+        const titulo = document.createElement('div');
+        titulo.className = 'texture-categoria';
+        titulo.innerText = cat.nome;
+        grade.appendChild(titulo);
+        cat.itens.forEach(t => desenharBotaoTextura(grade, t, grupo));
+    });
+    atualizarSeloDaTextura();
+}
+
+function desenharBotaoTextura(grade, t, grupo) {
+    {
         const caixa = document.createElement('div');
         caixa.className = 'texture-wrapper';
         const botao = document.createElement('div');
@@ -1308,13 +1444,14 @@ function montarPaletaTexturas() {
         rotulo.className = 'texture-label'; rotulo.innerText = t.nome;
         caixa.appendChild(botao); caixa.appendChild(rotulo);
         grade.appendChild(caixa);
-    });
-
-    const selo = document.getElementById('texturaAtiva');
-    if (selo) {
-        const escolhida = catalogoTexturas.find(t => t.id === texturaSelecionada[grupo]);
-        selo.innerText = escolhida ? escolhida.nome : 'nenhuma';
     }
+}
+
+function atualizarSeloDaTextura() {
+    const selo = document.getElementById('texturaAtiva');
+    if (!selo) return;
+    const escolhida = catalogoTexturas.find(t => t.id === texturaSelecionada[grupoDaFerramenta()]);
+    selo.innerText = escolhida ? escolhida.nome : 'nenhuma';
 }
 
 function updateUI() {
@@ -1325,7 +1462,7 @@ function updateUI() {
     document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
     document.getElementById('btnRoomOct').classList.toggle('active', currentBrush === 5 && !isErasing);
     document.getElementById('btnCerca').classList.toggle('active', currentBrush === 9 && !isErasing);
-    document.getElementById('btnPaintFloor').classList.toggle('active', currentBrush === 7 && !isErasing);
+    document.getElementById('btnPaintRoof').classList.toggle('active', currentBrush === 7 && !isErasing);
     document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
@@ -1420,6 +1557,23 @@ canvas.addEventListener('mousedown', (e) => {
     saveState(); 
 
     if (e.shiftKey) {
+        // Shift nas ferramentas de acabamento: pinta o cômodo inteiro de uma vez,
+        // em vez de preencher chao.
+        if (currentBrush === 7 || currentBrush === 8) {
+            saveState();
+            const celulas = celulasDoComodo(hoverRow, hoverCol);
+            if (currentBrush === 7) {
+                const nova = isErasing ? null : texturaSelecionada.telhado;
+                celulas.forEach(({ r, c }) => { map[r][c].texTelhado = nova; });
+            } else {
+                const nova = isErasing ? null : texturaSelecionada.parede;
+                arestasDoComodo(celulas).forEach(({ r, c, lado }) => { map[r][c]['tex' + lado] = nova; });
+                celulas.forEach(({ r, c }) => { if (map[r][c].column > 0) map[r][c].texColuna = nova; });
+            }
+            drawIsometricGrid();
+            return;
+        }
+
         if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
         const visited = new Set();
@@ -1438,10 +1592,36 @@ canvas.addEventListener('mousedown', (e) => {
             ? map[r][c].floor > 0
             : (currentFloor <= 0 || apoioDireto(currentFloor - 1, r, c));
 
+        // A celula cortada por diagonal nao entra na fila -- a parede corta a
+        // passagem --, mas a METADE virada para este lado e chao contiguo. Sem
+        // isto o preenchimento parava um triangulo antes da parede e deixava
+        // aquela franja de terra ao longo da diagonal.
+        const meiaVizinha = (r, c, vr, vc) => {
+            if (vr < 0 || vr >= GRADE || vc < 0 || vc >= GRADE) return;
+            const viz = map[vr][vc];
+            const cortada = viz.wallNS > 0 || viz.wallWE > 0;
+            if (!cortada) return;
+            // Olhando de (r,c): a metade encostada em nos e a do nosso lado.
+            const lado = viz.wallNS > 0
+                ? ((c < vc) ? 'W' : (c > vc) ? 'E' : (r < vr) ? 'E' : 'W')
+                : ((r < vr) ? 'N' : (r > vr) ? 'S' : (c < vc) ? 'N' : 'S');
+            const dentro = metadeCache[`${currentFloor},${vr},${vc}`];
+            if (dentro && lado === dentro) {
+                viz.floor = isErasing ? 0 : 1;
+                viz.texPiso = isErasing ? null : texturaSelecionada.piso;
+            } else {
+                viz.pisoFora = isErasing ? 0 : 1;
+                viz.texPisoFora = isErasing ? null : texturaSelecionada.piso;
+            }
+        };
+
         while(queue.length > 0) {
             const {r, c} = queue.shift();
             if (!podePintar(r, c)) continue;
             map[r][c].floor = isErasing ? 0 : 1;
+            map[r][c].texPiso = isErasing ? null : texturaSelecionada.piso;
+            meiaVizinha(r, c, r, c - 1); meiaVizinha(r, c, r, c + 1);
+            meiaVizinha(r, c, r - 1, c); meiaVizinha(r, c, r + 1, c);
 
             // A propagacao e limitada pelas PAREDES (testadas logo abaixo), nunca pelo
             // estado do piso. A trava antiga interrompia o preenchimento em toda celula
@@ -1452,10 +1632,21 @@ canvas.addEventListener('mousedown', (e) => {
             const wL_next = map[r][c+1].wallL > 0;
             const wR_next = map[r+1][c].wallR > 0;
 
-            if (c > 0 && !wL && !wWE && !wNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
-            if (c < GRADE - 1 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
-            if (r > 0 && !wR && !wWE && !wNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
-            if (r < GRADE - 1 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+            // No andar de cima a laje para nas paredes do andar DE BAIXO. Sem isso
+            // o preenchimento cobria tudo que tivesse chao embaixo -- se o terreo
+            // estivesse todo pintado, a laje tomava o tabuleiro inteiro.
+            const baixo = currentFloor > 0 ? mapData[currentFloor - 1] : null;
+            const bL = baixo ? baixo[r][c].wallL > 0 : false;
+            const bR = baixo ? baixo[r][c].wallR > 0 : false;
+            const bL_next = baixo ? baixo[r][c+1].wallL > 0 : false;
+            const bR_next = baixo ? baixo[r+1][c].wallR > 0 : false;
+            const bWE = baixo ? baixo[r][c].wallWE > 0 : false;
+            const bNS = baixo ? baixo[r][c].wallNS > 0 : false;
+
+            if (c > 0 && !wL && !wWE && !wNS && !bL && !bWE && !bNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
+            if (c < GRADE - 1 && !wL_next && !wWE && !wNS && !bL_next && !bWE && !bNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
+            if (r > 0 && !wR && !wWE && !wNS && !bR && !bWE && !bNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
+            if (r < GRADE - 1 && !wR_next && !wWE && !wNS && !bR_next && !bWE && !bNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
         }
         drawIsometricGrid();
         return; 
@@ -1592,7 +1783,7 @@ document.getElementById('btnColuna').addEventListener('click', () => { currentBr
 document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
 document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
 document.getElementById('btnCerca').addEventListener('click', () => { currentBrush = 9; updateUI(); });
-document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); montarPaletaTexturas(); });
+document.getElementById('btnPaintRoof').addEventListener('click', () => { currentBrush = 7; updateUI(); montarPaletaTexturas(); });
 document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); montarPaletaTexturas(); });
 
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
