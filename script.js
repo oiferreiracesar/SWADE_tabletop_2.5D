@@ -69,7 +69,7 @@ let surfaceColor = '#1e293b';
 // nunca fica um buraco esperando download.
 let catalogoTexturas = [];
 const imagensTextura = {};
-let texturaSelecionada = { piso: null, parede: null, telhado: null };
+let texturaSelecionada = { piso: null, parede: null, telhado: null, agua: null };
 
 function imagemDaTextura(id) {
     if (!id) return null;
@@ -88,10 +88,11 @@ function imagemDaTextura(id) {
 // Projeta a imagem quadrada em cima de um paralelogramo: p0 e o canto, u e v sao
 // os dois lados. E assim que a textura acompanha a perspectiva isometrica em vez
 // de ficar colada na tela.
-function pintarComTextura(img, p0, u, v, escurecer) {
+function pintarComTextura(img, p0, u, v, escurecer, recorte) {
     ctx.save();
     ctx.transform(u.x, u.y, v.x, v.y, p0.x, p0.y);
-    ctx.drawImage(img, 0, 0, 1, 1);
+    if (recorte) ctx.drawImage(img, recorte.sx, recorte.sy, recorte.s, recorte.s, 0, 0, 1, 1);
+    else ctx.drawImage(img, 0, 0, 1, 1);
     ctx.restore();
     if (escurecer) {
         ctx.fillStyle = escurecer;
@@ -135,6 +136,27 @@ function desenharTrianguloTexturizado(img, p1, p2, p3, uv1, uv2, uv3) {
     ctx.drawImage(img, 0, 0);
     ctx.restore();
     return true;
+}
+
+// Ao girar o tabuleiro, a IMAGEM tambem precisa girar: senao a tabua do assoalho
+// muda de direcao em relacao a casa a cada quarto de volta. Por isso o canto de
+// origem e os dois lados sao escolhidos conforme a rotacao atual.
+function baseDoPiso(pN, pL, pS, pO) {
+    const cantos = [pN, pL, pS, pO];
+    const o = cantos[rotacao % 4];
+    const a = cantos[(rotacao + 1) % 4];
+    const b = cantos[(rotacao + 3) % 4];
+    return { p0: o, u: { x: a.x - o.x, y: a.y - o.y }, v: { x: b.x - o.x, y: b.y - o.y } };
+}
+
+// A mesma volta, em coordenadas de imagem, para o telhado.
+function uvGirado(u, v) {
+    switch (rotacao % 4) {
+        case 1: return { u: v, v: 1 - u };
+        case 2: return { u: 1 - u, v: 1 - v };
+        case 3: return { u: 1 - v, v: u };
+        default: return { u, v };
+    }
 }
 
 // Cada face recebe um veu diferente para a parede nao virar um bloco chapado.
@@ -217,7 +239,10 @@ function createEmptyMap() {
                              cercaL: 0, cercaR: 0, cercaWE: 0, cercaNS: 0, pisoFora: 0,
                              texPiso: null, texPisoFora: null,
                              texL: null, texR: null, texWE: null, texNS: null,
-                             texTelhado: null, texColuna: null }; 
+                             texTelhado: null, texColuna: null,
+                             // agua decorativa: puramente estetica, mas BLOQUEIA a
+                             // celula -- nada se constroi por cima, como no The Sims 1
+                             agua: 0, texAgua: null }; 
         }
     }
     return newMap;
@@ -231,7 +256,8 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 function saveState() {
     const snapshot = {
         floor: currentFloor,
-        data: JSON.parse(JSON.stringify(mapData)) 
+        data: JSON.parse(JSON.stringify(mapData)),
+        agua: JSON.parse(JSON.stringify(pinceladasDeAgua))
     };
     mapHistory.push(snapshot);
     if (mapHistory.length > 30) mapHistory.shift();
@@ -570,7 +596,64 @@ function apoioDireto(fIndex, r, c) {
     return cel.column > 0 || cel.floor > 0 || isEnclosed(fIndex, r, c);
 }
 
+// A celula de agua e intransponivel: nao recebe chao, parede nem coluna. E o
+// mesmo tratamento do The Sims 1 -- obstaculo estatico, sem profundidade.
+function ehAgua(r, c) {
+    if (r < 0 || r >= GRADE || c < 0 || c >= GRADE) return false;
+    return map[r][c].agua > 0;
+}
+
+// A flag de bloqueio e RECALCULADA a partir das pinceladas: o centro do ladrilho
+// dentro de qualquer pincelada significa celula intransponivel. O resto do motor
+// (apoio, preenchimento, giro) continua conversando com a flag, como antes.
+function recalcularAgua() {
+    const m = mapData[0];
+    if (!m) return;
+    for (let r = 0; r < GRADE; r++) {
+        for (let c = 0; c < GRADE; c++) {
+            // Basta ENCOSTAR: se a pincelada invade qualquer pedaco do ladrilho,
+            // ele e agua. Testar so o centro deixava o vizinho meio molhado com
+            // chao pintado por cima -- e o chao recortava a curva do lago.
+            let dentro = null;
+            for (const p of pinceladasDeAgua) {
+                const dr = Math.max(r - p.r, 0, p.r - (r + 1));
+                const dc = Math.max(c - p.c, 0, p.c - (c + 1));
+                if (dr * dr + dc * dc <= p.raio * p.raio) { dentro = p; break; }
+            }
+            const cel = m[r][c];
+            // Agua nao derruba construcao. Se o ladrilho tem parede ou coluna, ele
+            // simplesmente nao molha -- passar o pincel perto de uma casa nao pode
+            // apagar a parede dela sem aviso.
+            const temEstrutura = cel.wallL > 0 || cel.wallR > 0 || cel.wallWE > 0
+                              || cel.wallNS > 0 || cel.column > 0;
+            if (dentro && !temEstrutura) {
+                // O chao continua ali, por baixo: agua e uma camada, nao um buraco.
+                // So a construcao e que fica proibida.
+                cel.agua = 1; cel.texAgua = dentro.estilo;
+            } else {
+                cel.agua = 0; cel.texAgua = null;
+            }
+        }
+    }
+}
+
+// Onde a pincelada cai na tela: um circulo na grade vira uma elipse na projecao
+// isometrica, e a projecao e linear -- entao basta desenhar o circulo com a
+// mesma transformacao que leva a grade para a tela.
+function tracarPinceladas(lista) {
+    ctx.beginPath();
+    for (const p of lista) {
+        ctx.save();
+        const centro = gridToScreen(p.r, p.c);
+        ctx.translate(centro.x, centro.y);
+        ctx.transform(tileWidth / 2, tileHeight / 2, -tileWidth / 2, tileHeight / 2, 0, 0);
+        ctx.arc(0, 0, p.raio, 0, Math.PI * 2);
+        ctx.restore();
+    }
+}
+
 function isFloorSupported(r, c) {
+    if (ehAgua(r, c)) return false;
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
     // Apoio DIRETO: o que ocupa a celula inteira embaixo -- piso, coluna ou o
@@ -595,6 +678,9 @@ function isFloorSupported(r, c) {
 }
 
 function isWallSupported(r, c, side) {
+    if (ehAgua(r, c)) return false;
+    if (side === 'L' && ehAgua(r, c - 1)) return false;
+    if (side === 'R' && ehAgua(r - 1, c)) return false;
     if (currentFloor <= 0) return true;
 
     // A laje sustenta o que se apoia nela: se ha chao de um dos lados da aresta,
@@ -713,6 +799,148 @@ function desenharVertice(v, cor, raio) {
 }
 
 
+// ===================== AGUA ANIMADA =====================
+//
+// A agua nao e uma imagem: e desenhada a cada quadro. Duas familias de ondas
+// senoidais se somam num ladrilho de 64x64 que fecha nas bordas (frequencias
+// inteiras), entao ele pode ser repetido sem costura. A crista de cada onda
+// recebe um brilho -- e o que da a leitura de "molhado" que uma foto parada
+// nunca da.
+
+const ESTILOS_DE_AGUA = [
+    { id: 'agua-lago',    nome: 'Lago',     funda: [18, 52, 74],  rasa: [86, 168, 190], vel: 0.55, brilho: 0.85 },
+    { id: 'agua-mar',     nome: 'Mar',      funda: [10, 38, 72],  rasa: [64, 140, 196], vel: 0.85, brilho: 1.0 },
+    { id: 'agua-pantano', nome: 'Pântano',  funda: [22, 46, 30],  rasa: [96, 140, 84],  vel: 0.30, brilho: 0.45 },
+    { id: 'agua-rio',     nome: 'Rio',      funda: [16, 60, 68],  rasa: [110, 190, 190], vel: 1.25, brilho: 0.9 },
+    { id: 'agua-fosso',   nome: 'Fosso',    funda: [12, 24, 34],  rasa: [48, 84, 104],  vel: 0.40, brilho: 0.55 },
+];
+
+// A agua nao mora mais na celula. Ela e uma lista de PINCELADAS em coordenadas
+// de grade (linha/coluna fracionarias), e a silhueta do lago e a uniao delas.
+// Guardar por celula obrigava a margem a ser a borda do losango -- agua em
+// formato de tabuleiro de xadrez. Com pinceladas, a borda e uma curva.
+let pinceladasDeAgua = [];        // { r, c, raio, estilo }
+let raioDoPincel = 0.85;          // em ladrilhos
+
+const LADO_AGUA = 64;
+const telasDeAgua = {};      // uma tela por estilo, redesenhada a cada quadro
+let tempoDaAgua = 0;
+let relogioDaAgua = null;
+
+function telaDoEstilo(id) {
+    if (!telasDeAgua[id]) {
+        const tela = document.createElement('canvas');
+        tela.width = LADO_AGUA; tela.height = LADO_AGUA;
+        telasDeAgua[id] = { tela, ctx: tela.getContext('2d'),
+                            imagem: tela.getContext('2d').createImageData(LADO_AGUA, LADO_AGUA) };
+    }
+    return telasDeAgua[id];
+}
+
+function desenharOndas(estilo, t) {
+    const alvo = telaDoEstilo(estilo.id);
+    const dados = alvo.imagem.data;
+    const passo = Math.PI * 2 / LADO_AGUA;
+    const fase = t * estilo.vel;
+
+    for (let y = 0; y < LADO_AGUA; y++) {
+        const v = y * passo;
+        for (let x = 0; x < LADO_AGUA; x++) {
+            const u = x * passo;
+            // Frequencias inteiras: o ladrilho fecha nas quatro bordas.
+            let h = Math.sin(u + fase) * 0.45
+                  + Math.sin(v * 2 - fase * 0.8) * 0.3
+                  + Math.sin((u + v) * 2 + fase * 1.3) * 0.22
+                  + Math.sin((u - v) * 3 - fase * 0.6) * 0.16;
+            const m = Math.min(1, Math.max(0, (h + 1) / 2));
+            const i = (y * LADO_AGUA + x) * 4;
+            dados[i]     = estilo.funda[0] + (estilo.rasa[0] - estilo.funda[0]) * m;
+            dados[i + 1] = estilo.funda[1] + (estilo.rasa[1] - estilo.funda[1]) * m;
+            dados[i + 2] = estilo.funda[2] + (estilo.rasa[2] - estilo.funda[2]) * m;
+            dados[i + 3] = 255;
+
+            // A crista vira brilho: pouca area, muito efeito.
+            if (h > 0.72) {
+                const f = (h - 0.72) * 3 * estilo.brilho;
+                dados[i]     = Math.min(255, dados[i] + 200 * f);
+                dados[i + 1] = Math.min(255, dados[i + 1] + 215 * f);
+                dados[i + 2] = Math.min(255, dados[i + 2] + 230 * f);
+            }
+        }
+    }
+    alvo.ctx.putImageData(alvo.imagem, 0, 0);
+    return alvo.tela;
+}
+
+function estiloDeAgua(id) {
+    return ESTILOS_DE_AGUA.find(e => e.id === id) || ESTILOS_DE_AGUA[0];
+}
+
+function superficieDeAgua(id) {
+    return desenharOndas(estiloDeAgua(id), tempoDaAgua);
+}
+
+function existeAgua() {
+    return currentFloor === 0 && pinceladasDeAgua.length > 0;
+}
+
+// A agua e uma camada continua desenhada ANTES dos ladrilhos: assim a silhueta e
+// a uniao das pinceladas, e nao a soma de losangos.
+function desenharCamadaDeAgua() {
+    if (currentFloor !== 0 || !pinceladasDeAgua.length) return;
+
+    const porEstilo = {};
+    for (const p of pinceladasDeAgua) (porEstilo[p.estilo] = porEstilo[p.estilo] || []).push(p);
+
+    for (const id of Object.keys(porEstilo)) {
+        const lista = porEstilo[id];
+        const superficie = superficieDeAgua(id);
+
+        // MARGEM: a silhueta inteira preenchida em escuro, com desfoque, forma um
+        // halo por fora. Contornar cada pincelada desenharia as emendas internas
+        // do traco -- o lago ficava com arcos escuros no meio.
+        ctx.save();
+        ctx.shadowColor = 'rgba(4, 12, 20, 0.8)';
+        ctx.shadowBlur = 9;
+        ctx.fillStyle = 'rgba(4, 12, 20, 0.95)';
+        tracarPinceladas(lista);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        tracarPinceladas(lista);
+        ctx.clip();
+
+        // A onda e amostrada em coordenadas de MUNDO: o desenho atravessa o lago
+        // inteiro sem emenda, em vez de recomecar em cada ladrilho.
+        const meio = LADO_AGUA / 2;
+        for (let r = 0; r < GRADE; r++) {
+            for (let c = 0; c < GRADE; c++) {
+                const pN = gridToScreen(r, c), pL = gridToScreen(r, c + 1);
+                const pS = gridToScreen(r + 1, c + 1), pO = gridToScreen(r + 1, c);
+                const base = baseDoPiso(pN, pL, pS, pO);
+                pintarComTextura(superficie, base.p0, base.u, base.v, null,
+                                 { sx: (c % 2) * meio, sy: (r % 2) * meio, s: meio });
+            }
+        }
+        ctx.restore();
+    }
+}
+
+// O relogio so corre quando ha agua na cena: um tabuleiro seco nao gasta quadro.
+function cuidarDoRelogioDaAgua() {
+    const precisa = existeAgua();
+    if (precisa && !relogioDaAgua) {
+        relogioDaAgua = setInterval(() => {
+            tempoDaAgua += 0.12;
+            drawIsometricGrid();
+        }, 80);
+    } else if (!precisa && relogioDaAgua) {
+        clearInterval(relogioDaAgua);
+        relogioDaAgua = null;
+    }
+}
+
 // ===================== ROTACAO DA CAMERA =====================
 //
 // Girar a vista 90 graus e, na pratica, girar o tabuleiro sob a camera. E a
@@ -753,7 +981,7 @@ function arestaDosVertices(a, b) {
 function girarAndar(m) {
     const novo = createEmptyMap();
     const campos = ['floor', 'pisoFora', 'column', 'texPiso', 'texPisoFora',
-                    'texTelhado', 'texColuna'];
+                    'texTelhado', 'texColuna', 'agua', 'texAgua'];
 
     for (let r = 0; r < GRADE; r++) {
         for (let c = 0; c < GRADE; c++) {
@@ -788,8 +1016,11 @@ function girarCamera(sentido) {
         for (const f of Object.keys(mapData).map(Number)) {
             mapData[f] = girarAndar(mapData[f]);
         }
+        // A pincelada gira pelo mesmo caminho dos vertices.
+        pinceladasDeAgua = pinceladasDeAgua.map(p => ({ ...p, r: p.c, c: GRADE - p.r }));
         rotacao = (rotacao + 1) % 4;
     }
+    recalcularAgua();
     map = mapData[currentFloor];
     isDragging = false; dragStartNode = null;
     verticeA = null; verticeB = null;
@@ -929,8 +1160,11 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     // nem grama, nem grade -- se tivesse, o tabuleiro pareceria 11x11.
     const naMargem = (row === GRADE || col === GRADE);
 
-    if (renderPass === 0 && !naMargem) {
-        const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
+    // O passe 2 desenha SO o chao, e roda antes da agua; a estrutura vem depois,
+    // no passe 0. E isso que faz o lago ficar POR CIMA da grama em vez de abrir
+    // buracos escuros nos ladrilhos que ele encosta.
+    if (renderPass === 2 && !naMargem) {
+        const hasContent = targetMap[row][col].agua > 0 || targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
         
         let shouldDrawGrid = false;
         if (fIndex === currentFloor) {
@@ -948,8 +1182,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         const temPiso = targetMap[row][col].floor > 0;
         const dentroPts = poligonoDentro(metade, pNorte, pLeste, pSul, pOeste);
 
+        const temAgua = targetMap[row][col].agua > 0;
         let isDirt = false;
-        if (fIndex <= 0 && !temPiso && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
+        if (fIndex <= 0 && !temPiso && !temAgua && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
 
         // A metade que sobrou do lado de fora da diagonal e sempre terra.
         const temPisoFora = targetMap[row][col].pisoFora > 0;
@@ -958,11 +1193,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ? imagemDaTextura(targetMap[row][col].texPisoFora) : null;
             const fora = poligonoFora(metade, pNorte, pLeste, pSul, pOeste);
             if (imgFora) {
+                const baseF = baseDoPiso(pNorte, pLeste, pSul, pOeste);
                 ctx.save();
                 tracarPoligono(fora); ctx.clip();
-                pintarComTextura(imgFora, pNorte,
-                                 { x: pLeste.x - pNorte.x, y: pLeste.y - pNorte.y },
-                                 { x: pOeste.x - pNorte.x, y: pOeste.y - pNorte.y }, null);
+                pintarComTextura(imgFora, baseF.p0, baseF.u, baseF.v, null);
                 ctx.restore();
             } else {
                 ctx.fillStyle = temPisoFora
@@ -972,17 +1206,60 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             }
         }
 
-        if (isDirt) {
+        // A agua do terreo e desenhada em camada propria, antes dos ladrilhos.
+        // Aqui so sobra o caso do andar de baixo visto de cima (fantasma).
+        if (temAgua && isGhost) {
+            ctx.fillStyle = 'rgba(60,90,120,0.4)';
+            tracarPoligono(dentroPts); ctx.fill();
+        } else if (false) {
+            const baseA = baseDoPiso(pNorte, pLeste, pSul, pOeste);
+            if (isGhost) {
+                ctx.fillStyle = 'rgba(60,90,120,0.4)';
+                tracarPoligono(dentroPts); ctx.fill();
+            } else {
+                // Meia onda por ladrilho: como o desenho fecha nas bordas, as
+                // celulas emendam, e o padrao so se repete a cada duas -- sem o
+                // efeito de papel de parede que uma onda inteira por ladrilho da.
+                const meio = LADO_AGUA / 2;
+                ctx.save(); tracarPoligono(dentroPts); ctx.clip();
+                pintarComTextura(superficieDeAgua(targetMap[row][col].texAgua),
+                                 baseA.p0, baseA.u, baseA.v, null,
+                                 { sx: (col % 2) * meio, sy: (row % 2) * meio, s: meio });
+                ctx.restore();
+            }
+
+            // MARGEM: onde a agua encosta na terra, uma sombra curta. E o que
+            // separa o lago do chao sem precisar de contorno desenhado.
+            if (!isGhost) {
+                const vizinhoSeco = (vr, vc) => !(vr >= 0 && vr < GRADE && vc >= 0 && vc < GRADE
+                                                 && targetMap[vr][vc].agua > 0);
+                const margens = [
+                    [vizinhoSeco(row, col - 1), pOeste, pNorte],
+                    [vizinhoSeco(row - 1, col), pNorte, pLeste],
+                    [vizinhoSeco(row, col + 1), pLeste, pSul],
+                    [vizinhoSeco(row + 1, col), pSul, pOeste],
+                ];
+                ctx.save();
+                tracarPoligono(dentroPts); ctx.clip();
+                ctx.strokeStyle = 'rgba(6, 16, 26, 0.5)';
+                ctx.lineWidth = 6;
+                margens.forEach(([seco, a, b]) => {
+                    if (!seco) return;
+                    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                });
+                ctx.restore();
+                ctx.lineWidth = 1;
+            }
+        } else if (isDirt) {
             ctx.fillStyle = dirtColor;
             tracarPoligono(dentroPts); ctx.fill();
         } else if (temPiso) {
             const imgPiso = isGhost ? null : imagemDaTextura(targetMap[row][col].texPiso);
             if (imgPiso) {
+                const base = baseDoPiso(pNorte, pLeste, pSul, pOeste);
                 ctx.save();
                 tracarPoligono(dentroPts); ctx.clip();
-                pintarComTextura(imgPiso, pNorte,
-                                 { x: pLeste.x - pNorte.x, y: pLeste.y - pNorte.y },
-                                 { x: pOeste.x - pNorte.x, y: pOeste.y - pNorte.y }, null);
+                pintarComTextura(imgPiso, base.p0, base.u, base.v, null);
                 ctx.restore();
             } else {
                 ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : corPiso;
@@ -990,7 +1267,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             }
         }
 
-        if (shouldDrawGrid) {
+        if (shouldDrawGrid && !temAgua) {
             tracarPoligono(dentroPts);
             const texturado = targetMap[row][col].texPiso && temPiso;
             ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)'
@@ -1177,7 +1454,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             // A textura do telhado e a do cômodo: cada fatia leva as coordenadas do
             // seu pedaco da imagem, tiradas da posicao na grade.
             const imgTelhado = isGhost ? null : imagemDaTextura(targetMap[row][col].texTelhado);
-            const uvDe = (p3d) => ({ u: p3d.y - col, v: p3d.x - row });
+            const uvDe = (p3d) => uvGirado(p3d.y - col, p3d.x - row);
 
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
@@ -1215,10 +1492,12 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             const raioEntre = [1, 2, 3, 4, 5, 6, 7, 0];   // NE, E, SE, S, SW, W, NW, N
             const normais = fatias.map(([, , a3, b3]) => normalDoTelhado(a3, b3, pC_3d));
 
+            // Com telha, a propria imagem mostra onde uma agua encontra a outra;
+            // o risco preto so serve no modo cru.
             ctx.strokeStyle = 'rgba(12, 16, 22, 0.85)';
             ctx.lineWidth = 2;
             ctx.lineCap = 'round';
-            for (const i of indices) {
+            for (const i of (imgTelhado ? [] : indices)) {
                 const j = (i + 1) % 8;
                 if (indices.indexOf(j) === -1) continue;   // a vizinha foi recortada pela diagonal
                 const n1 = normais[i], n2 = normais[j];
@@ -1281,6 +1560,7 @@ function andarVisivel(f) {
 }
 
 function drawIsometricGrid() {
+    cuidarDoRelogioDaAgua();
     precalculateRooms(); 
     
     ctx.fillStyle = currentFloor >= 0 ? surfaceColor : undergroundColor;
@@ -1312,6 +1592,15 @@ function drawIsometricGrid() {
         return a.c - b.c; 
     });
 
+    // 1) o chao inteiro: e plano, nao disputa profundidade com ninguem
+    for (const cell of renderQueue) {
+        renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 2);
+    }
+
+    // 2) a agua: por cima do chao, por baixo de tudo que fica de pe
+    desenharCamadaDeAgua();
+
+    // 3) paredes, colunas e telhados, na ordem de profundidade
     for (const cell of renderQueue) {
         renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 0);
         renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 1);
@@ -1386,7 +1675,7 @@ function arestasDoComodo(celulas) {
 
 function applySmartBrush() {
     if (hoverRow < 0 || hoverRow >= GRADE || hoverCol < 0 || hoverCol >= GRADE) return;
-    const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
+    const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
     // Antes daqui saia um 'return' quando o corte estava desligado: com o telhado
     // aparecendo, piso e coluna simplesmente nao entravam, sem aviso nenhum.
@@ -1420,6 +1709,35 @@ function applySmartBrush() {
         return; 
     }
     
+    // AGUA DECORATIVA (0): pinta a celula e bloqueia. O que estava construido ali
+    // sai -- agua e chao nao ocupam o mesmo ladrilho.
+    if (currentBrush === 0) {
+        if (currentFloor !== 0) return;          // agua so no terreo
+        const r = hoverRow + hoverFracao.fr, c = hoverCol + hoverFracao.fc;
+
+        if (currentEraseMode) {
+            // A borracha tira as pinceladas que o cursor alcanca.
+            pinceladasDeAgua = pinceladasDeAgua.filter(p => {
+                const dr = r - p.r, dc = c - p.c;
+                return Math.sqrt(dr * dr + dc * dc) > p.raio * 0.6 + raioDoPincel * 0.4;
+            });
+            recalcularAgua();
+            return;
+        }
+
+        // Enquanto o mouse arrasta, uma pincelada a cada meio raio: menos que
+        // isso e desperdicio, mais que isso deixa o traco serrilhado.
+        const ultima = pinceladasDeAgua[pinceladasDeAgua.length - 1];
+        if (ultima) {
+            const dr = r - ultima.r, dc = c - ultima.c;
+            if (Math.sqrt(dr * dr + dc * dc) < raioDoPincel * 0.35) return;
+        }
+        pinceladasDeAgua.push({ r, c, raio: raioDoPincel,
+                                estilo: texturaSelecionada.agua || ESTILOS_DE_AGUA[0].id });
+        recalcularAgua();
+        return;
+    }
+
     // PINTAR TELHADO (7): a agua e do cômodo inteiro, nao de um ladrilho, entao
     // um clique pinta o cômodo sob o cursor de uma vez.
     if (currentBrush === 7) {
@@ -1498,6 +1816,7 @@ function changeFloor(delta) {
 function grupoDaFerramenta() {
     if (currentBrush === 8) return 'parede';
     if (currentBrush === 7) return 'telhado';
+    if (currentBrush === 0) return 'agua';
     return 'piso';
 }
 
@@ -1518,6 +1837,26 @@ function montarPaletaTexturas() {
     rotuloLimpar.className = 'texture-label'; rotuloLimpar.innerText = 'Sem textura';
     limpar.appendChild(botaoLimpar); limpar.appendChild(rotuloLimpar);
     grade.appendChild(limpar);
+
+    // A agua nao vem de arquivo: e desenhada. A amostra da paleta e um quadro
+    // do proprio efeito, congelado.
+    if (grupo === 'agua') {
+        ESTILOS_DE_AGUA.forEach(estilo => {
+            const caixa = document.createElement('div');
+            caixa.className = 'texture-wrapper';
+            const botao = document.createElement('div');
+            botao.className = 'texture-btn' + (texturaSelecionada.agua === estilo.id ? ' selected' : '');
+            botao.style.backgroundImage = `url(${desenharOndas(estilo, 1.7).toDataURL()})`;
+            botao.title = estilo.nome;
+            botao.addEventListener('click', () => { texturaSelecionada.agua = estilo.id; montarPaletaTexturas(); });
+            const rotulo = document.createElement('div');
+            rotulo.className = 'texture-label'; rotulo.innerText = estilo.nome;
+            caixa.appendChild(botao); caixa.appendChild(rotulo);
+            grade.appendChild(caixa);
+        });
+        atualizarSeloDaTextura();
+        return;
+    }
 
     // Agrupadas por categoria: procurar "tijolo" no meio de quarenta quadradinhos
     // sem nome nao e escolher, e adivinhar.
@@ -1558,7 +1897,13 @@ function desenharBotaoTextura(grade, t, grupo) {
 function atualizarSeloDaTextura() {
     const selo = document.getElementById('texturaAtiva');
     if (!selo) return;
-    const escolhida = catalogoTexturas.find(t => t.id === texturaSelecionada[grupoDaFerramenta()]);
+    const grupo = grupoDaFerramenta();
+    if (grupo === 'agua') {
+        const e = ESTILOS_DE_AGUA.find(x => x.id === texturaSelecionada.agua);
+        selo.innerText = e ? e.nome : 'nenhuma';
+        return;
+    }
+    const escolhida = catalogoTexturas.find(t => t.id === texturaSelecionada[grupo]);
     selo.innerText = escolhida ? escolhida.nome : 'nenhuma';
 }
 
@@ -1572,6 +1917,7 @@ function updateUI() {
     document.getElementById('btnCerca').classList.toggle('active', currentBrush === 9 && !isErasing);
     document.getElementById('btnPaintRoof').classList.toggle('active', currentBrush === 7 && !isErasing);
     document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
+    document.getElementById('btnAgua').classList.toggle('active', currentBrush === 0 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
@@ -1597,6 +1943,15 @@ carregarCatalogoTexturas();
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
     definirAlturaParede(parseInt(e.target.value));
 });
+
+const sliderPincel = document.getElementById('sliderPincelAgua');
+if (sliderPincel) {
+    sliderPincel.addEventListener('input', (e) => {
+        raioDoPincel = parseInt(e.target.value) / 100;
+        const rotulo = document.getElementById('valorPincelAgua');
+        if (rotulo) rotulo.innerText = raioDoPincel.toFixed(2).replace('.', ',');
+    });
+}
 
 document.getElementById('roofPitchSelect').addEventListener('change', (e) => {
     roofPitch = parseInt(e.target.value);
@@ -1648,7 +2003,7 @@ canvas.addEventListener('mousemove', (e) => {
     }
 
     if (isDragging) {
-        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+        if (currentBrush === 0 || currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -1667,6 +2022,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (e.shiftKey) {
         // Shift nas ferramentas de acabamento: pinta o cômodo inteiro de uma vez,
         // em vez de preencher chao.
+        if (currentBrush === 0) { applySmartBrush(); drawIsometricGrid(); return; }
         if (currentBrush === 7 || currentBrush === 8) {
             saveState();
             const celulas = celulasDoComodo(hoverRow, hoverCol);
@@ -1682,7 +2038,7 @@ canvas.addEventListener('mousedown', (e) => {
             return;
         }
 
-        if (!isErasing && !isFloorSupported(hoverRow, hoverCol)) return;
+        if (!isErasing && currentBrush !== 0 && !isFloorSupported(hoverRow, hoverCol)) return;
         const queue = [{r: hoverRow, c: hoverCol}];
         const visited = new Set();
         visited.add(`${hoverRow},${hoverCol}`);
@@ -1696,9 +2052,14 @@ canvas.addEventListener('mousedown', (e) => {
         // com uma saia de sobra em volta do predio.
         // Apagando, o preenchimento so atravessa o que TEM chao -- senao, um
         // Shift+Ctrl no vazio caminhava pelo tabuleiro inteiro e limpava a laje.
-        const podePintar = (r, c) => isErasing
-            ? map[r][c].floor > 0
-            : (currentFloor <= 0 || apoioDireto(currentFloor - 1, r, c));
+        // Agua nao usa mais preenchimento por celula: o pincel e continuo.
+        const pintandoAgua = false;
+        const podePintar = (r, c) => {
+            if (pintandoAgua) return isErasing ? map[r][c].agua > 0 : currentFloor === 0;
+            if (ehAgua(r, c)) return false;      // agua bloqueia: o chao nao passa por cima
+            return isErasing ? map[r][c].floor > 0
+                             : (currentFloor <= 0 || apoioDireto(currentFloor - 1, r, c));
+        };
 
         // A celula cortada por diagonal nao entra na fila -- a parede corta a
         // passagem --, mas a METADE virada para este lado e chao contiguo. Sem
@@ -1726,8 +2087,18 @@ canvas.addEventListener('mousedown', (e) => {
         while(queue.length > 0) {
             const {r, c} = queue.shift();
             if (!podePintar(r, c)) continue;
-            map[r][c].floor = isErasing ? 0 : 1;
-            map[r][c].texPiso = isErasing ? null : texturaSelecionada.piso;
+            if (pintandoAgua) {
+                const cel = map[r][c];
+                if (isErasing) { cel.agua = 0; cel.texAgua = null; }
+                else {
+                    cel.agua = 1; cel.texAgua = texturaSelecionada.agua || ESTILOS_DE_AGUA[0].id;
+                    cel.floor = 0; cel.texPiso = null; cel.pisoFora = 0; cel.column = 0;
+                    cel.wallL = 0; cel.wallR = 0; cel.wallWE = 0; cel.wallNS = 0;
+                }
+            } else {
+                map[r][c].floor = isErasing ? 0 : 1;
+                map[r][c].texPiso = isErasing ? null : texturaSelecionada.piso;
+            }
             meiaVizinha(r, c, r, c - 1); meiaVizinha(r, c, r, c + 1);
             meiaVizinha(r, c, r - 1, c); meiaVizinha(r, c, r + 1, c);
 
@@ -1751,10 +2122,11 @@ canvas.addEventListener('mousedown', (e) => {
             const bWE = baixo ? baixo[r][c].wallWE > 0 : false;
             const bNS = baixo ? baixo[r][c].wallNS > 0 : false;
 
-            if (c > 0 && !wL && !wWE && !wNS && !bL && !bWE && !bNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
-            if (c < GRADE - 1 && !wL_next && !wWE && !wNS && !bL_next && !bWE && !bNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
-            if (r > 0 && !wR && !wWE && !wNS && !bR && !bWE && !bNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
-            if (r < GRADE - 1 && !wR_next && !wWE && !wNS && !bR_next && !bWE && !bNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+            const barraAgua = (vr, vc) => !pintandoAgua && ehAgua(vr, vc);
+            if (c > 0 && !wL && !wWE && !wNS && !bL && !bWE && !bNS && !barraAgua(r, c-1) && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
+            if (c < GRADE - 1 && !wL_next && !wWE && !wNS && !bL_next && !bWE && !bNS && !barraAgua(r, c+1) && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
+            if (r > 0 && !wR && !wWE && !wNS && !bR && !bWE && !bNS && !barraAgua(r-1, c) && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
+            if (r < GRADE - 1 && !wR_next && !wWE && !wNS && !bR_next && !bWE && !bNS && !barraAgua(r+1, c) && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
         }
         drawIsometricGrid();
         return; 
@@ -1762,8 +2134,8 @@ canvas.addEventListener('mousedown', (e) => {
 
     isDragging = true; 
     
-    if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
-        dragStartNode = { type: currentBrush === 1 ? 'floor' : (currentBrush === 6 ? 'column' : 'pintura'), row: hoverRow, col: hoverCol, erase: isErasing };
+    if (currentBrush === 0 || currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
+        dragStartNode = { type: currentBrush === 1 ? 'floor' : (currentBrush === 6 ? 'column' : (currentBrush === 0 ? 'agua' : 'pintura')), row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
     } else if (currentBrush === 3 || currentBrush === 4 || currentBrush === 5) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
@@ -1856,6 +2228,7 @@ window.addEventListener('keydown', (e) => {
             const previousState = mapHistory.pop();
             currentFloor = previousState.floor;
             mapData = JSON.parse(JSON.stringify(previousState.data));
+            pinceladasDeAgua = JSON.parse(JSON.stringify(previousState.agua || []));
             map = mapData[currentFloor];
             
             updateUI();
@@ -1864,7 +2237,7 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2','3','4','5','6','7','8','9'].includes(e.key)) {
+    if (['0','1','2','3','4','5','6','7','8','9'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
@@ -1894,6 +2267,7 @@ document.getElementById('btnColuna').addEventListener('click', () => { currentBr
 document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
 document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
 document.getElementById('btnCerca').addEventListener('click', () => { currentBrush = 9; updateUI(); });
+document.getElementById('btnAgua').addEventListener('click', () => { currentBrush = 0; updateUI(); montarPaletaTexturas(); });
 document.getElementById('btnPaintRoof').addEventListener('click', () => { currentBrush = 7; updateUI(); montarPaletaTexturas(); });
 document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); montarPaletaTexturas(); });
 

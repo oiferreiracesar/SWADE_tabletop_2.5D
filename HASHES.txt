@@ -1,0 +1,55 @@
+BASELINE v2 — SWADE Tabletop 2.5D
+Congelada em 14/09/2026, commit 0006ea0, suite 32/32.
+
+MD5 de cada arquivo desta pasta:
+
+453b7872b09da795d8d4e1c70892997a  index.html
+223b9ef1d2c9b63d3704fc6050e12e52  script.js
+dbc32bab4459a27f2b3a425492bb5959  style.css
+4b68fbad64e3758e3c92d5d94b499940  teste-regressao.js
+451686d0abd86ac59ab7c6a307d2101a  texturas/manifesto.json
+5e71f7ee76e2fa3431f0ba800ef26119  texturas/grama-01.webp
+c7d377fc352c28c71ae4a788ac171afb  texturas/grama-02.webp
+7d57bcfb176c3be4984c01b1865e7ebd  texturas/grama-03.webp
+f1f77716aa85b25174cbecc0b2ab1768  texturas/grama-04.webp
+1857ae716dcaf344d021a50d6d0a5847  texturas/ladrilho-01.webp
+76972e87db36988b39beac93c78ae284  texturas/ladrilho-02.webp
+48f034b157ec9345d0b356ab5fe3189c  texturas/ladrilho-03.webp
+49c4532c910b5bcfc8408988e318f667  texturas/ladrilho-04.webp
+dcc8b3d0f75ae0dd243f0dabae8736f2  texturas/madeira-01.webp
+416b60ec6f8241400e91a77548349e35  texturas/madeira-02.webp
+74cd1c1d7b5a4e484a924faa0de07134  texturas/madeira-03.webp
+60f2c292e49b086c29373e226357221d  texturas/metal-01.webp
+c340c05ba682b94ea111d95af7266fc1  texturas/metal-02.webp
+11e77d1da5537388aa726073e80b6cf2  texturas/pedra-01.webp
+5c5b76cc3f393c6e297c9e5a646ae349  texturas/pedra-02.webp
+059a38dc1c1621a74bcbe6cb5aa8bf2d  texturas/pedra-03.webp
+11e77d1da5537388aa726073e80b6cf2  texturas/pedra-parede-01.webp
+5c5b76cc3f393c6e297c9e5a646ae349  texturas/pedra-parede-02.webp
+059a38dc1c1621a74bcbe6cb5aa8bf2d  texturas/pedra-parede-03.webp
+d308850f28df776477925ace2a86a4a5  texturas/reboco-01.webp
+be1862e38b0d7f5cc84b14f62a0d06a8  texturas/reboco-02.webp
+fdcef02f2156519b50513a4018e97980  texturas/reboco-03.webp
+dcc8b3d0f75ae0dd243f0dabae8736f2  texturas/tabua-01.webp
+416b60ec6f8241400e91a77548349e35  texturas/tabua-02.webp
+74cd1c1d7b5a4e484a924faa0de07134  texturas/tabua-03.webp
+e0e3449e367550ac5de0b9bc1a99c95b  texturas/telha-01.webp
+431397f062c7814460aec80b9ea8fc69  texturas/telha-02.webp
+df781f5ba1c9578e779439ec23bd8f6b  texturas/telha-03.webp
+dba3c6e4024a3074c4fa9eb4f3d4a164  texturas/telha-04.webp
+131a767bbba826cd1fa1dd316cb0ad32  texturas/telha-05.webp
+ddd696a016fefc9cdf130efa9ba72535  texturas/telha-06.webp
+bb118b092751fdb65b9e5845e14af9e1  texturas/terra-01.webp
+fb49eb7c7c0c648fb38f6cfa24e39d15  texturas/terra-02.webp
+1e0aaebad67d0855e187b96a0dec6d8d  texturas/terra-03.webp
+aa2d0a7ea0073e737d8c49196a8f3768  texturas/terreno-01.webp
+216cd30cb116d9850843c97de1fe1b4a  texturas/terreno-02.webp
+6ff6d8783e7badbf514082586daa3809  texturas/terreno-03.webp
+4473dae8ca34045656f962c887d5c1c3  texturas/terreno-04.webp
+2a69c99b3c1f9ff05e3fbcb2f88e2a09  texturas/tijolinho-01.webp
+85324db0d685efe45345bdd97e8131a2  texturas/tijolinho-02.webp
+5c24760eb780e046c4bd1467b6f074f1  texturas/tijolinho-03.webp
+756dbc32bd5351604c5f9c0221dd83a8  texturas/tijolo-01.webp
+b2eb6d0a5df93020ce92adb427c3c8a9  texturas/tijolo-02.webp
+2399bf5cffef50fc7eac3e89f999f709  texturas/tijolo-03.webp
+6339bce24c88e1350e12ba6734596e5d  texturas/tijolo-04.webp
