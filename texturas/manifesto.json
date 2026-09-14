@@ -1,0 +1,239 @@
+{
+ "fonte": "Screaming Brain Studios — Tiny Texture Packs 1, 2 e 3 (CC0)",
+ "texturas": [
+  {
+   "id": "grama-01",
+   "nome": "Grama 1",
+   "grupo": "piso",
+   "arquivo": "texturas/grama-01.webp"
+  },
+  {
+   "id": "grama-02",
+   "nome": "Grama 2",
+   "grupo": "piso",
+   "arquivo": "texturas/grama-02.webp"
+  },
+  {
+   "id": "grama-03",
+   "nome": "Grama 3",
+   "grupo": "piso",
+   "arquivo": "texturas/grama-03.webp"
+  },
+  {
+   "id": "grama-04",
+   "nome": "Grama 4",
+   "grupo": "piso",
+   "arquivo": "texturas/grama-04.webp"
+  },
+  {
+   "id": "terra-01",
+   "nome": "Terra 1",
+   "grupo": "piso",
+   "arquivo": "texturas/terra-01.webp"
+  },
+  {
+   "id": "terra-02",
+   "nome": "Terra 2",
+   "grupo": "piso",
+   "arquivo": "texturas/terra-02.webp"
+  },
+  {
+   "id": "terra-03",
+   "nome": "Terra 3",
+   "grupo": "piso",
+   "arquivo": "texturas/terra-03.webp"
+  },
+  {
+   "id": "ladrilho-01",
+   "nome": "Ladrilho 1",
+   "grupo": "piso",
+   "arquivo": "texturas/ladrilho-01.webp"
+  },
+  {
+   "id": "ladrilho-02",
+   "nome": "Ladrilho 2",
+   "grupo": "piso",
+   "arquivo": "texturas/ladrilho-02.webp"
+  },
+  {
+   "id": "ladrilho-03",
+   "nome": "Ladrilho 3",
+   "grupo": "piso",
+   "arquivo": "texturas/ladrilho-03.webp"
+  },
+  {
+   "id": "ladrilho-04",
+   "nome": "Ladrilho 4",
+   "grupo": "piso",
+   "arquivo": "texturas/ladrilho-04.webp"
+  },
+  {
+   "id": "madeira-01",
+   "nome": "Madeira 1",
+   "grupo": "piso",
+   "arquivo": "texturas/madeira-01.webp"
+  },
+  {
+   "id": "madeira-02",
+   "nome": "Madeira 2",
+   "grupo": "piso",
+   "arquivo": "texturas/madeira-02.webp"
+  },
+  {
+   "id": "madeira-03",
+   "nome": "Madeira 3",
+   "grupo": "piso",
+   "arquivo": "texturas/madeira-03.webp"
+  },
+  {
+   "id": "terreno-01",
+   "nome": "Terreno 1",
+   "grupo": "piso",
+   "arquivo": "texturas/terreno-01.webp"
+  },
+  {
+   "id": "terreno-02",
+   "nome": "Terreno 2",
+   "grupo": "piso",
+   "arquivo": "texturas/terreno-02.webp"
+  },
+  {
+   "id": "terreno-03",
+   "nome": "Terreno 3",
+   "grupo": "piso",
+   "arquivo": "texturas/terreno-03.webp"
+  },
+  {
+   "id": "terreno-04",
+   "nome": "Terreno 4",
+   "grupo": "piso",
+   "arquivo": "texturas/terreno-04.webp"
+  },
+  {
+   "id": "pedra-01",
+   "nome": "Pedra 1",
+   "grupo": "piso",
+   "arquivo": "texturas/pedra-01.webp"
+  },
+  {
+   "id": "pedra-02",
+   "nome": "Pedra 2",
+   "grupo": "piso",
+   "arquivo": "texturas/pedra-02.webp"
+  },
+  {
+   "id": "pedra-03",
+   "nome": "Pedra 3",
+   "grupo": "piso",
+   "arquivo": "texturas/pedra-03.webp"
+  },
+  {
+   "id": "tijolo-01",
+   "nome": "Tijolo 1",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolo-01.webp"
+  },
+  {
+   "id": "tijolo-02",
+   "nome": "Tijolo 2",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolo-02.webp"
+  },
+  {
+   "id": "tijolo-03",
+   "nome": "Tijolo 3",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolo-03.webp"
+  },
+  {
+   "id": "tijolo-04",
+   "nome": "Tijolo 4",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolo-04.webp"
+  },
+  {
+   "id": "tijolinho-01",
+   "nome": "Tijolo miúdo 1",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolinho-01.webp"
+  },
+  {
+   "id": "tijolinho-02",
+   "nome": "Tijolo miúdo 2",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolinho-02.webp"
+  },
+  {
+   "id": "tijolinho-03",
+   "nome": "Tijolo miúdo 3",
+   "grupo": "parede",
+   "arquivo": "texturas/tijolinho-03.webp"
+  },
+  {
+   "id": "reboco-01",
+   "nome": "Reboco 1",
+   "grupo": "parede",
+   "arquivo": "texturas/reboco-01.webp"
+  },
+  {
+   "id": "reboco-02",
+   "nome": "Reboco 2",
+   "grupo": "parede",
+   "arquivo": "texturas/reboco-02.webp"
+  },
+  {
+   "id": "reboco-03",
+   "nome": "Reboco 3",
+   "grupo": "parede",
+   "arquivo": "texturas/reboco-03.webp"
+  },
+  {
+   "id": "pedra-parede-01",
+   "nome": "Pedra 1",
+   "grupo": "parede",
+   "arquivo": "texturas/pedra-parede-01.webp"
+  },
+  {
+   "id": "pedra-parede-02",
+   "nome": "Pedra 2",
+   "grupo": "parede",
+   "arquivo": "texturas/pedra-parede-02.webp"
+  },
+  {
+   "id": "pedra-parede-03",
+   "nome": "Pedra 3",
+   "grupo": "parede",
+   "arquivo": "texturas/pedra-parede-03.webp"
+  },
+  {
+   "id": "tabua-01",
+   "nome": "Tábua 1",
+   "grupo": "parede",
+   "arquivo": "texturas/tabua-01.webp"
+  },
+  {
+   "id": "tabua-02",
+   "nome": "Tábua 2",
+   "grupo": "parede",
+   "arquivo": "texturas/tabua-02.webp"
+  },
+  {
+   "id": "tabua-03",
+   "nome": "Tábua 3",
+   "grupo": "parede",
+   "arquivo": "texturas/tabua-03.webp"
+  },
+  {
+   "id": "metal-01",
+   "nome": "Metal 1",
+   "grupo": "parede",
+   "arquivo": "texturas/metal-01.webp"
+  },
+  {
+   "id": "metal-02",
+   "nome": "Metal 2",
+   "grupo": "parede",
+   "arquivo": "texturas/metal-02.webp"
+  }
+ ]
+}
