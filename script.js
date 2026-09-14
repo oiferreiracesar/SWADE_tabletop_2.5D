@@ -5,19 +5,137 @@ const container = document.getElementById('canvas-container');
 const tileWidth = 64;
 const tileHeight = 32;
 
-let originX = 0; 
-let originY = 100;
+// CAMERA.
+// camX/camY deslocam o mapa; camZoom escala tudo em torno do centro da tela.
+// Todo mundo -- desenho, clique e teste -- passa por worldParaTela/telaParaWorld,
+// para nao existir duas versoes da mesma conta.
+let camX = 0, camY = 0;
+let camZoom = 1;
+const ZOOM_MIN = 0.4, ZOOM_MAX = 2.5;
 
-const levelHeight = 48; 
-let blockHeight = 48; 
-const cutawayHeight = 12; 
+// Centro geometrico do tabuleiro no espaco projetado: gridToScreen(5,5).
+const CENTRO_MAPA = { x: 0, y: 10 * 32 / 2 };
+
+// GRADE = quantos ladrilhos o tabuleiro tem. BORDA = quantas LINHAS de celula o
+// motor guarda. Sao numeros diferentes de proposito: parede mora em ARESTA, e a
+// aresta leste do ultimo ladrilho so tem onde ser guardada se existir uma faixa
+// de celulas sentinela depois dele. Sem ela o tabuleiro 10x10 era, na pratica,
+// 9x9 -- nao dava para encostar construcao na borda.
+const GRADE = 10;
+const BORDA = GRADE + 1;
+
+function worldParaTela(wx, wy) {
+    return {
+        x: canvas.width  / 2 + (wx + camX - CENTRO_MAPA.x) * camZoom,
+        y: canvas.height / 2 + (wy + camY - CENTRO_MAPA.y) * camZoom,
+    };
+}
+function telaParaWorld(sx, sy) {
+    return {
+        x: (sx - canvas.width  / 2) / camZoom - camX + CENTRO_MAPA.x,
+        y: (sy - canvas.height / 2) / camZoom - camY + CENTRO_MAPA.y,
+    };
+}
+// Posicao do mouse em coordenadas fracionarias da grade (inverso de gridToScreen).
+function telaParaGrade(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const w = telaParaWorld(clientX - rect.left, clientY - rect.top);
+    return {
+        col: (w.x / (tileWidth / 2) + w.y / (tileHeight / 2)) / 2,
+        row: (w.y / (tileHeight / 2) - w.x / (tileWidth / 2)) / 2,
+    };
+}
+
+// ALTURA: propriedade de CADA parede, nao do andar.
+// blockHeight e a altura da PROXIMA parede a ser construida -- um ajuste de
+// ferramenta. Paredes ja erguidas guardam a sua e nao mudam, o que permite
+// parede baixa e nave de igreja no mesmo tabuleiro.
+let blockHeight = 48;
+let cutawayHeight = 12;
+
+// O empilhamento de andares tem altura propria e fixa: com paredes de alturas
+// variadas nao existe "a" altura do andar. Parede mais alta que isso atravessa
+// o piso de cima de proposito -- e assim que se faz um pe-direito duplo.
+const alturaDoAndar = 48;
+
+// Altura do telhado de cada cômodo: a da parede mais alta que o cerca.
+let alturaComodo = {};
 
 let surfaceColor = '#1e293b'; 
+
+// ===================== TEXTURAS =====================
+// O catalogo vem do manifesto; as imagens sao carregadas sob demanda e guardadas
+// aqui. Enquanto uma imagem nao chega, o desenho cai na cor solida de sempre --
+// nunca fica um buraco esperando download.
+let catalogoTexturas = [];
+const imagensTextura = {};
+let texturaSelecionada = { piso: null, parede: null };
+
+function imagemDaTextura(id) {
+    if (!id) return null;
+    const pronta = imagensTextura[id];
+    if (pronta) return pronta.completa ? pronta.img : null;
+    const item = catalogoTexturas.find(t => t.id === id);
+    if (!item) return null;
+    const img = new Image();
+    const registro = { img, completa: false };
+    imagensTextura[id] = registro;
+    img.onload = () => { registro.completa = true; drawIsometricGrid(); };
+    img.src = item.arquivo;
+    return null;
+}
+
+// Projeta a imagem quadrada em cima de um paralelogramo: p0 e o canto, u e v sao
+// os dois lados. E assim que a textura acompanha a perspectiva isometrica em vez
+// de ficar colada na tela.
+function pintarComTextura(img, p0, u, v, escurecer) {
+    ctx.save();
+    ctx.transform(u.x, u.y, v.x, v.y, p0.x, p0.y);
+    ctx.drawImage(img, 0, 0, 1, 1);
+    ctx.restore();
+    if (escurecer) {
+        ctx.fillStyle = escurecer;
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p0.x + u.x, p0.y + u.y);
+        ctx.lineTo(p0.x + u.x + v.x, p0.y + u.y + v.y);
+        ctx.lineTo(p0.x + v.x, p0.y + v.y);
+        ctx.closePath();
+        ctx.fill();
+    }
+}
+
+// Cada face recebe um veu diferente para a parede nao virar um bloco chapado.
+const veuDaFace = { L: 'rgba(0,0,0,0.30)', R: 'rgba(255,255,255,0.06)',
+                    WE: 'rgba(0,0,0,0.16)', NS: 'rgba(0,0,0,0.24)' };
+
+function carregarCatalogoTexturas() {
+    fetch('texturas/manifesto.json')
+        .then(r => r.ok ? r.json() : null)
+        .then(dados => {
+            if (!dados) return;
+            catalogoTexturas = dados.texturas || [];
+            montarPaletaTexturas();
+            drawIsometricGrid();
+        })
+        .catch(() => { /* sem manifesto o motor segue nas cores solidas */ });
+}
+
 let undergroundColor = '#0a0705'; 
 let dirtColor = '#1e140f'; 
 let roofColor = '#475569'; 
 
 let roofPitch = 24; 
+
+// DUAS PALETAS COM PAPEIS SEPARADOS.
+// Construido = pedra/reboco neutro. Verde = vai construir. Vermelho = vai apagar.
+// Antes a parede pronta era vermelha e o chao pronto era verde, colidindo
+// exatamente com o significado das cores de acao.
+const corParede = { L: '#8a7f6d', R: '#c4b8a2', WE: '#b0a48f', NS: '#9d9280' };
+const corPiso   = 'rgba(138, 126, 106, 0.6)';
+const corCerca  = { L: '#6b5a3e', R: '#9c8659', WE: '#8a7550', NS: '#7a6847' };
+const corAcaoConstruir = 'rgba(100, 255, 100, 0.8)';
+const corAcaoApagar    = 'rgba(255, 70, 70, 0.85)';
 
 let hoverCol = -1;
 let hoverRow = -1;
@@ -25,8 +143,16 @@ let hoverQuadrant = 'none';
 let currentBrush = 1;
 
 let isDragging = false;
-let dragStartNode = null; 
+let dragStartNode = null;
 let previewWalls = [];
+
+// Ferramenta de parede no modelo do Sims: voce mira no CANTO da grade, nao dentro
+// do quadrado. O ponto A trava no canto, a linha acompanha o mouse e o ponto B
+// marca a ponta. Some a adivinhacao de "qual aresta ele quis".
+let verticeA = null;      // canto onde o traco comecou
+let verticeB = null;      // canto final, ja preso a reta ou a 45 graus
+let verticeHover = null;  // canto sob o mouse antes de clicar
+let hoverFracao = { fr: 0.5, fc: 0.5 };   // onde dentro da celula, para a metade cortada
 let isCutaway = true; 
 let mapHistory = [];
 let isErasing = false;
@@ -37,12 +163,28 @@ let map;
 
 let enclosedCache = {};
 
+// Onde o telhado DESTE andar realmente existe: comodo fechado que nao tem
+// nada construido em cima. Estilo The Sims: o andar de cima come o telhado
+// do de baixo, e o que sobra vira o telhado menor ao redor.
+let telhadoCache = {};
+
+// Para a celula cortada por uma parede diagonal, guarda QUAL metade esta dentro:
+// 'E'/'W' quando o corte e wallNS, 'N'/'S' quando e wallWE. null = celula inteira.
+let metadeCache = {};
+
 function createEmptyMap() {
     const newMap = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < BORDA; i++) {
         newMap[i] = [];
-        for (let j = 0; j < 10; j++) {
-            newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0 }; 
+        for (let j = 0; j < BORDA; j++) {
+            // cercaX marca que a parede daquela aresta e meia parede: ela e desenhada
+            // baixa e NAO fecha cômodo, entao nao gera telhado.
+            // pisoFora e o chao da metade que sobra do lado de fora de uma parede
+            // diagonal: a celula cortada tem dois lados, e os dois podem ser piso.
+            newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0,
+                             cercaL: 0, cercaR: 0, cercaWE: 0, cercaNS: 0, pisoFora: 0,
+                             texPiso: null, texPisoFora: null,
+                             texL: null, texR: null, texWE: null, texNS: null }; 
         }
     }
     return newMap;
@@ -77,7 +219,20 @@ function defineTilePath(pNorte, pLeste, pSul, pOeste) {
     ctx.closePath();
 }
 
-function drawFlatWall(p1, p2, height, color) {
+function drawFlatWall(p1, p2, height, color, textura, face) {
+    const img = imagemDaTextura(textura);
+    if (img) {
+        pintarComTextura(img, { x: p1.x, y: p1.y },
+                         { x: p2.x - p1.x, y: p2.y - p1.y },
+                         { x: 0, y: -height },
+                         veuDaFace[face] || null);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(p2.x, p2.y - height); ctx.lineTo(p1.x, p1.y - height);
+        ctx.closePath();
+        ctx.strokeStyle = '#222'; ctx.lineWidth = 1; ctx.stroke();
+        return;
+    }
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y); 
     ctx.lineTo(p2.x, p2.y); 
@@ -95,6 +250,13 @@ function isEnclosed(fIndex, startRow, startCol) {
     const fMap = mapData[fIndex];
     if (!fMap) return false;
 
+    // A celula cortada por uma diagonal fica meio dentro, meio fora -- a pergunta
+    // "esta fechada?" nao tem resposta por celula inteira. Antes o laco descartava
+    // essa celula e, com a fila vazia, concluia "fechada": QUALQUER diagonal passava
+    // como cômodo, inclusive uma solta em campo aberto. Quem decide o estado dessas
+    // celulas agora e a segunda passada de precalculateRooms.
+    if (fMap[startRow][startCol].wallWE > 0 || fMap[startRow][startCol].wallNS > 0) return false;
+
     const queue = [{r: startRow, c: startCol}];
     const visited = new Set();
     visited.add(`${startRow},${startCol}`);
@@ -110,16 +272,16 @@ function isEnclosed(fIndex, startRow, startCol) {
             if (c === 0) return false; 
             if (!visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
         }
-        if (c === 9) return false; 
-        else if (fMap[r][c+1].wallL === 0) {
+        if (fMap[r][c+1].wallL === 0) {
+            if (c === GRADE - 1) return false;
             if (!visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
         }
         if (fMap[r][c].wallR === 0) {
             if (r === 0) return false;
             if (!visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
         }
-        if (r === 9) return false;
-        else if (fMap[r+1][c].wallR === 0) {
+        if (fMap[r+1][c].wallR === 0) {
+            if (r === GRADE - 1) return false;
             if (!visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
         }
     }
@@ -128,53 +290,226 @@ function isEnclosed(fIndex, startRow, startCol) {
 
 function precalculateRooms() {
     enclosedCache = {};
+    telhadoCache = {};
+    metadeCache = {};
+    alturaComodo = {};
     const floors = Object.keys(mapData).map(Number);
+
     for (const f of floors) {
-        for (let r = 0; r < 10; r++) {
-            for (let c = 0; c < 10; c++) {
-                enclosedCache[`${f},${r},${c}`] = isEnclosed(f, r, c);
+        const m = mapData[f];
+        const cortadas = [];
+        const visitado = [];
+        for (let r = 0; r < BORDA; r++) visitado.push(new Array(BORDA).fill(false));
+        // Cerca nao conta como parede aqui: o espaco atravessa ela, entao area
+        // cercada continua "aberta" e nao ganha telhado.
+        const paredeReal = (h, cerca) => (cerca ? 0 : h);
+        const ehCortada = (r, c) => paredeReal(m[r][c].wallWE, m[r][c].cercaWE) > 0
+                                 || paredeReal(m[r][c].wallNS, m[r][c].cercaNS) > 0;
+
+        // Passada 1: rotula os espacos conectados de uma vez so, e ja colhe a
+        // altura da parede mais alta que cerca cada um.
+        // Antes isso era uma varredura separada POR CELULA -- cem varreduras por
+        // quadro respondendo a mesma pergunta.
+        for (let r0 = 0; r0 < GRADE; r0++) {
+            for (let c0 = 0; c0 < GRADE; c0++) {
+                if (ehCortada(r0, c0)) {
+                    cortadas.push({ r: r0, c: c0 });
+                    enclosedCache[`${f},${r0},${c0}`] = false;
+                    continue;
+                }
+                if (visitado[r0][c0]) continue;
+
+                const fila = [{ r: r0, c: c0 }];
+                visitado[r0][c0] = true;
+                const grupo = [];
+                let fechado = true;
+                let altura = 0;
+
+                while (fila.length) {
+                    const { r, c } = fila.shift();
+                    grupo.push({ r, c });
+                    const cel = m[r][c];
+
+                    // Em cada aresta: ou existe parede -- e entao ela conta para a
+                    // altura do cômodo -- ou o espaco continua pelo vizinho. Chegar
+                    // na borda do mapa sem parede significa que o espaco vaza.
+                    const passo = (alturaParede, vr, vc, naBorda) => {
+                        if (alturaParede > 0) { if (alturaParede > altura) altura = alturaParede; return; }
+                        if (naBorda) { fechado = false; return; }
+                        if (ehCortada(vr, vc)) return;          // a diagonal bloqueia a passagem
+                        if (visitado[vr][vc]) return;
+                        visitado[vr][vc] = true;
+                        fila.push({ r: vr, c: vc });
+                    };
+
+                    passo(paredeReal(cel.wallL, cel.cercaL), r, c - 1, c === 0);
+                    passo(paredeReal(cel.wallR, cel.cercaR), r - 1, c, r === 0);
+                    // A aresta leste/sul agora existe de verdade (faixa sentinela),
+                    // entao uma parede encostada na borda fecha o comodo.
+                    passo(paredeReal(m[r][c+1].wallL, m[r][c+1].cercaL), r, c + 1, c === GRADE - 1);
+                    passo(paredeReal(m[r+1][c].wallR, m[r+1][c].cercaR), r + 1, c, r === GRADE - 1);
+                }
+
+                for (const g of grupo) {
+                    enclosedCache[`${f},${g.r},${g.c}`] = fechado;
+                    if (fechado) alturaComodo[`${f},${g.r},${g.c}`] = altura || blockHeight;
+                }
+            }
+        }
+
+        // Passada 2: a celula cortada por diagonal herda o estado -- e a altura --
+        // do vizinho de dentro. Numa diagonal solta no meio do nada nenhum vizinho
+        // esta fechado, e ela fica de fora.
+        for (const { r, c } of cortadas) {
+            const cel = m[r][c];
+            const viz = {
+                O: c > 0 && cel.wallL === 0       && enclosedCache[`${f},${r},${c-1}`],
+                L: c < GRADE - 1 && m[r][c+1].wallL === 0 && enclosedCache[`${f},${r},${c+1}`],
+                N: r > 0 && cel.wallR === 0       && enclosedCache[`${f},${r-1},${c}`],
+                S: r < GRADE - 1 && m[r+1][c].wallR === 0 && enclosedCache[`${f},${r+1},${c}`],
+            };
+            let metade = null;
+            if (cel.wallNS > 0) {            // corte de norte a sul: metade leste x oeste
+                if (viz.N || viz.L) metade = 'E';
+                else if (viz.O || viz.S) metade = 'W';
+            } else {                          // corte de oeste a leste: metade norte x sul
+                if (viz.O || viz.N) metade = 'N';
+                else if (viz.L || viz.S) metade = 'S';
+            }
+            metadeCache[`${f},${r},${c}`] = metade;
+            enclosedCache[`${f},${r},${c}`] = metade !== null;
+
+            if (metade) {
+                let h = Math.max(cel.wallWE, cel.wallNS);
+                const vizinhos = [[viz.O, r, c-1], [viz.L, r, c+1], [viz.N, r-1, c], [viz.S, r+1, c]];
+                for (const [dentro, vr, vc] of vizinhos) {
+                    if (dentro) h = Math.max(h, alturaComodo[`${f},${vr},${vc}`] || 0);
+                }
+                alturaComodo[`${f},${r},${c}`] = h || blockHeight;
+            }
+        }
+    }
+
+    // Passada 3: o telhado so cobre o que NAO tem andar em cima. Isso tem que
+    // ser decidido depois de rotular todos os andares, porque depende do de cima.
+    for (const f of floors) {
+        for (let r = 0; r < GRADE; r++) {
+            for (let c = 0; c < GRADE; c++) {
+                // Subsolo nao tem telhado: a sala e escavada na rocha. Isso ja
+                // valia no desenho; agora vale tambem no dado, para nenhuma conta
+                // de altura enxergar telhado onde nunca vai existir um.
+                telhadoCache[`${f},${r},${c}`] = f >= 0
+                    && !!enclosedCache[`${f},${r},${c}`] && !hasStructureAbove(f, r, c);
             }
         }
     }
 }
 
+// Cantos da parte de DENTRO da celula: o losango inteiro, ou o triangulo do lado
+// de dentro da parede diagonal.
+function poligonoDentro(metade, pN, pL, pS, pO) {
+    if (!metade) return [pN, pL, pS, pO];
+    if (metade === 'E') return [pN, pL, pS];
+    if (metade === 'W') return [pN, pS, pO];
+    if (metade === 'N') return [pO, pN, pL];
+    return [pO, pL, pS];
+}
+// A metade oposta — o pedaco que ficou do lado de fora da parede.
+function poligonoFora(metade, pN, pL, pS, pO) {
+    if (metade === 'E') return [pN, pS, pO];
+    if (metade === 'W') return [pN, pL, pS];
+    if (metade === 'N') return [pO, pL, pS];
+    return [pO, pN, pL];
+}
+function tracarPoligono(pts) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+}
+
 function getRoofZ(fIndex, x, y, pitch) {
     let minDist = Infinity;
+    const m = mapData[fIndex];
+
+    // Distancia ate a CAIXA de uma celula, na mesma metrica usada pelo telhado.
+    const distCaixa = (r, c) => {
+        let dx = 0; if (x < r) dx = r - x; else if (x > r + 1) dx = x - (r + 1);
+        let dy = 0; if (y < c) dy = c - y; else if (y > c + 1) dy = y - (c + 1);
+        return Math.max(dx, dy);
+    };
+
     for (let r = -2; r <= 11; r++) {
         for (let c = -2; c <= 11; c++) {
-            let isEnclosedCell = false;
-            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                // Ter piso nao implica estar fechado: uma laje ou um patio a ceu aberto
-                // tem chao e nao tem telhado. So o cômodo fechado conta.
-                isEnclosedCell = enclosedCache[`${fIndex},${r},${c}`];
-            }
-            if (!isEnclosedCell) {
-                let dx = 0;
-                if (x < r) dx = r - x;
-                else if (x > r + 1) dx = x - (r + 1);
-                
-                let dy = 0;
-                if (y < c) dy = c - y;
-                else if (y > c + 1) dy = y - (c + 1);
-                
-                let dist = Math.max(dx, dy);
-                if (dist < minDist) minDist = dist;
+            const noMapa = r >= 0 && r < GRADE && c >= 0 && c < GRADE;
+            // Ter piso nao implica estar fechado: uma laje ou patio a ceu aberto
+            // tem chao e nao tem telhado. So o cômodo fechado conta.
+            // A borda do telhado e a parede OU a linha onde o andar de cima
+            // comeca. Antes so a parede contava: o telhado continuava subindo por
+            // baixo do andar superior e depois era cortado na marra -- por isso a
+            // agua saia gigante e desencontrada.
+            const fechada = noMapa ? telhadoCache[`${fIndex},${r},${c}`] : false;
+
+            // Celula que so ficou de fora por causa do andar de cima. Se la em cima
+            // ela e cortada por uma diagonal, METADE dela ainda e telhado deste
+            // andar -- entao a fronteira e a LINHA da parede de cima, nao a caixa
+            // da celula. Medindo por caixa, o telhado despencava a zero na celula
+            // inteira e abria aquele entalhe em V embaixo do chanfro.
+            const cobertaPorCima = noMapa && !fechada && enclosedCache[`${fIndex},${r},${c}`];
+            const metadeAcima = cobertaPorCima ? metadeCache[`${fIndex + 1},${r},${c}`] : null;
+
+            if (metadeAcima) {
+                const celAcima = mapData[fIndex + 1][r][c];
+                const dReta = celAcima.wallWE > 0
+                    ? Math.abs((x + y) - (r + c + 1)) / 2
+                    : Math.abs((x - y) - (r - c)) / 2;
+                // A reta e infinita: o max com a caixa impede que o chanfro de um
+                // canto rebaixe o telhado do outro lado do mapa.
+                const d = Math.max(dReta, distCaixa(r, c));
+                if (d < minDist) minDist = d;
+            } else if (!fechada) {
+                const d = distCaixa(r, c);
+                if (d < minDist) minDist = d;
+            } else if (noMapa && metadeCache[`${fIndex},${r},${c}`]) {
+                // CELULA CORTADA POR DIAGONAL.
+                // Metade dela e lado de fora, entao a borda do telhado e a propria
+                // LINHA da parede, nao a caixa da celula. Medindo por caixa, o
+                // telhado despencava a zero so nos vertices onde duas diagonais se
+                // encontram, e ficava alto no resto -- o funil entre as aguas.
+                //
+                // Nesta metrica, a distancia ate a reta x+y=k e |x+y-k|/2, porque
+                // um passo diagonal muda a soma em 2 sem sair da vizinhanca.
+                // O max com a distancia da caixa evita que a reta, que e infinita,
+                // rebaixe o telhado longe do trecho de parede que realmente existe.
+                const cel = m[r][c];
+                const dReta = cel.wallWE > 0
+                    ? Math.abs((x + y) - (r + c + 1)) / 2
+                    : Math.abs((x - y) - (r - c)) / 2;
+                const d = Math.max(dReta, distCaixa(r, c));
+                if (d < minDist) minDist = d;
             }
         }
     }
     return minDist * pitch;
 }
 
-function getTriangleShade(p1, p2, p3) {
-    let det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
-    if (Math.abs(det) < 0.0001) return 'rgba(0,0,0,0)'; 
+// Inclinacao da agua do telhado. Duas fatias com normais diferentes significam
+// que ha uma dobra entre elas -- e uma cumeeira ou um espigao.
+function normalDoTelhado(p1, p2, p3) {
+    const det = (p2.x - p1.x)*(p3.y - p1.y) - (p3.x - p1.x)*(p2.y - p1.y);
+    if (Math.abs(det) < 0.0001) return null;
+    const a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det;
+    const b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det;
+    return { nx: -a, ny: -b };
+}
 
-    let a = ((p2.z - p1.z)*(p3.y - p1.y) - (p3.z - p1.z)*(p2.y - p1.y)) / det; 
-    let b = ((p3.z - p1.z)*(p2.x - p1.x) - (p2.z - p1.z)*(p3.x - p1.x)) / det; 
+function getTriangleShade(p1, p2, p3) {
+    const n = normalDoTelhado(p1, p2, p3);
+    if (!n) return 'rgba(0,0,0,0)';
 
     let eps = 0.01;
-    let nx = -a; 
-    let ny = -b;
+    let nx = n.nx;
+    let ny = n.ny;
 
     if (nx > eps && Math.abs(ny) <= eps) return 'rgba(255,255,255,0.15)'; 
     if (nx < -eps && Math.abs(ny) <= eps) return 'rgba(0,0,0,0.1)'; 
@@ -189,15 +524,36 @@ function getTriangleShade(p1, p2, p3) {
     return 'rgba(255,255,255,0.05)'; 
 }
 
+// O que sustenta uma laje por baixo, ocupando a celula inteira.
+function apoioDireto(fIndex, r, c) {
+    if (r < 0 || r >= GRADE || c < 0 || c >= GRADE) return false;
+    const m = mapData[fIndex];
+    if (!m) return false;
+    const cel = m[r][c];
+    return cel.column > 0 || cel.floor > 0 || isEnclosed(fIndex, r, c);
+}
+
 function isFloorSupported(r, c) {
     if (currentFloor <= 0) return true; 
     if (!mapData[currentFloor - 1]) return false;
-    const lower = mapData[currentFloor - 1][r][c];
-    if (lower.column === 1) return true;
-    if (lower.wallL > 0 || lower.wallR > 0 || lower.wallWE > 0 || lower.wallNS > 0) return true;
-    if (c < 9 && mapData[currentFloor-1][r][c+1].wallL > 0) return true;
-    if (r < 9 && mapData[currentFloor-1][r+1][c].wallR > 0) return true;
-    if (isEnclosed(currentFloor - 1, r, c)) return true;
+    // Apoio DIRETO: o que ocupa a celula inteira embaixo -- piso, coluna ou o
+    // interior de um cômodo. Parede sozinha nao conta: ela mora na ARESTA, e como
+    // as arestas norte/oeste ficam na propria celula e as leste/sul na vizinha,
+    // aceitar parede fazia a laje avancar um ladrilho so de dois lados do predio.
+    if (apoioDireto(currentFloor - 1, r, c)) return true;
+
+    // BALANCO DE UM LADRILHO: a sacada pode avancar um passo alem do apoio sem
+    // nada embaixo -- e o beiral que toda construcao aguenta. Do segundo ladrilho
+    // em diante e que a coluna passa a ser necessaria.
+    // Os oito vizinhos, nao quatro: na tela isometrica, o ladrilho "a frente"
+    // e o (r+1, c+1) da grade. Contar so os quatro ortogonais recusava justamente
+    // o passo que a pessoa ve como o primeiro.
+    for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            if (apoioDireto(currentFloor - 1, r + dr, c + dc)) return true;
+        }
+    }
     return false;
 }
 
@@ -209,9 +565,9 @@ function isWallSupported(r, c, side) {
     if (side === 'R' && lower.wallR > 0) return true;
     if (side === 'WE' && lower.wallWE > 0) return true;
     if (side === 'NS' && lower.wallNS > 0) return true;
-    if (lower.column === 1) return true;
-    if (side === 'L' && c > 0 && mapData[currentFloor - 1][r][c - 1].column === 1) return true;
-    if (side === 'R' && r > 0 && mapData[currentFloor - 1][r - 1][c].column === 1) return true;
+    if (lower.column > 0) return true;
+    if (side === 'L' && c > 0 && mapData[currentFloor - 1][r][c - 1].column > 0) return true;
+    if (side === 'R' && r > 0 && mapData[currentFloor - 1][r - 1][c].column > 0) return true;
     if (isEnclosed(currentFloor - 1, r, c)) return true;
     if (side === 'L' && c > 0 && isEnclosed(currentFloor - 1, r, c - 1)) return true;
     if (side === 'R' && r > 0 && isEnclosed(currentFloor - 1, r - 1, c)) return true;
@@ -234,8 +590,8 @@ function hasStructureAbove(fIndex, r, c) {
 function isFloorEmpty(fIndex) {
     const fMap = mapData[fIndex];
     if (!fMap) return true;
-    for(let r=0; r<10; r++) {
-        for(let c=0; c<10; c++) {
+    for(let r=0; r<BORDA; r++) {
+        for(let c=0; c<BORDA; c++) {
             if (fMap[r][c].floor > 0 || fMap[r][c].wallWE > 0 || fMap[r][c].wallNS > 0 || fMap[r][c].wallL > 0 || fMap[r][c].wallR > 0 || fMap[r][c].column > 0) {
                 return false;
             }
@@ -245,85 +601,176 @@ function isFloorEmpty(fIndex) {
 }
 
 function getTargetEdge(hRow, hCol, hQuad) {
-    if (hRow < 0 || hRow >= 10 || hCol < 0 || hCol >= 10) return null;
+    if (hRow < 0 || hRow >= GRADE || hCol < 0 || hCol >= GRADE) return null;
     let tRow = hRow, tCol = hCol, side = 'L';
     if (hQuad === 'NE') side = 'R';
     else if (hQuad === 'SW') { tRow += 1; side = 'R'; }
     else if (hQuad === 'SE') { tCol += 1; side = 'L'; }
-    if (tRow >= 0 && tRow < 10 && tCol >= 0 && tCol < 10) return { row: tRow, col: tCol, side };
+    if (tRow >= 0 && tRow < BORDA && tCol >= 0 && tCol < BORDA) return { row: tRow, col: tCol, side };
     return null;
+}
+
+// Converte a posicao do mouse no canto (vertice) mais proximo da grade.
+// E a operacao inversa de gridToScreen: se x = (c-r)*32 e y = (c+r)*16,
+// entao c = (x/32 + y/16)/2 e r = (y/16 - x/32)/2.
+function screenToVertice(clientX, clientY) {
+    const g = telaParaGrade(clientX, clientY);
+    return {
+        row: Math.max(0, Math.min(GRADE, Math.round(g.row))),
+        col: Math.max(0, Math.min(GRADE, Math.round(g.col)))
+    };
+}
+
+// Prende o ponto B a uma reta ou a 45 graus, como no Sims.
+// Os limites 22,5 e 67,5 graus dividem cada quadrante em tres fatias iguais.
+function restringirB(a, bBruto) {
+    const dR = bBruto.row - a.row, dC = bBruto.col - a.col;
+    const aR = Math.abs(dR), aC = Math.abs(dC);
+    if (aR === 0 && aC === 0) return { row: a.row, col: a.col };
+
+    const proporcao = aC === 0 ? Infinity : aR / aC;
+    if (proporcao > 2.414) return { row: bBruto.row, col: a.col };        // vertical
+    if (proporcao < 0.414) return { row: a.row, col: bBruto.col };        // horizontal
+    const passos = Math.round((aR + aC) / 2);                             // 45 graus
+    return { row: a.row + Math.sign(dR) * passos, col: a.col + Math.sign(dC) * passos };
+}
+
+// Traduz o traco A->B para as arestas onde o motor guarda as paredes.
+function segmentosEntre(a, b) {
+    const segs = [];
+    const dR = b.row - a.row, dC = b.col - a.col;
+    const passos = Math.max(Math.abs(dR), Math.abs(dC));
+    if (passos === 0) return segs;
+    const sR = Math.sign(dR), sC = Math.sign(dC);
+
+    for (let i = 0; i < passos; i++) {
+        const r = a.row + i * sR, c = a.col + i * sC;
+        if (sC === 0)      segs.push({ row: Math.min(r, r + sR), col: c, side: 'L' });   // vertical
+        else if (sR === 0) segs.push({ row: r, col: Math.min(c, c + sC), side: 'R' });   // horizontal
+        else segs.push({ row: Math.min(r, r + sR), col: Math.min(c, c + sC),
+                         side: (sR === sC) ? 'NS' : 'WE' });                             // 45 graus
+    }
+    // As bordas leste e sul do tabuleiro nao tem onde guardar parede (ver 9x9).
+    return segs.filter(s => s.row >= 0 && s.row < BORDA && s.col >= 0 && s.col < BORDA);
+}
+
+function desenharVertice(v, cor, raio) {
+    if (!v) return;
+    const p = gridToScreen(v.row, v.col);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - raio); ctx.lineTo(p.x + raio * 1.6, p.y);
+    ctx.lineTo(p.x, p.y + raio);  ctx.lineTo(p.x - raio * 1.6, p.y);
+    ctx.closePath();
+    ctx.fillStyle = cor; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
+
+// ===================== CERCA E SALAS PRE-MOLDADAS =====================
+
+// A cerca e uma parede de meia altura: nao fecha comodo, logo nao gera telhado.
+function alturaCerca() { return Math.max(8, Math.round(blockHeight / 2)); }
+
+const v_ = (row, col) => ({ row, col });
+
+// Triangulo retangulo: o angulo reto fica no canto onde o arrasto comecou e a
+// hipotenusa desce a 45 graus -- por isso a caixa e forcada a ser quadrada.
+function contornoTriangulo(N, S, O, L, ancoraNorte, ancoraOeste) {
+    const lado = Math.min(S - N, L - O);
+    if (lado < 1) return [];
+    if (ancoraNorte) S = N + lado; else N = S - lado;
+    if (ancoraOeste) L = O + lado; else O = L - lado;
+
+    if (ancoraNorte && ancoraOeste)   return [[v_(N,O),v_(N,L)], [v_(N,O),v_(S,O)], [v_(N,L),v_(S,O)]];
+    if (ancoraNorte && !ancoraOeste)  return [[v_(N,O),v_(N,L)], [v_(N,L),v_(S,L)], [v_(N,O),v_(S,L)]];
+    if (!ancoraNorte && ancoraOeste)  return [[v_(S,O),v_(S,L)], [v_(N,O),v_(S,O)], [v_(N,O),v_(S,L)]];
+    return [[v_(S,O),v_(S,L)], [v_(N,L),v_(S,L)], [v_(N,L),v_(S,O)]];
+}
+
+// Octogono: um retangulo com os quatro cantos chanfrados a 45 graus.
+function contornoOctogono(N, S, O, L) {
+    const menor = Math.min(S - N, L - O);
+    if (menor < 3) return contornoRetangulo(N, S, O, L);
+    const k = Math.max(1, Math.floor(menor / 4));
+    return [
+        [v_(N, O+k), v_(N, L-k)],   // norte
+        [v_(N, L-k), v_(N+k, L)],   // chanfro nordeste
+        [v_(N+k, L), v_(S-k, L)],   // leste
+        [v_(S-k, L), v_(S, L-k)],   // chanfro sudeste
+        [v_(S, L-k), v_(S, O+k)],   // sul
+        [v_(S, O+k), v_(S-k, O)],   // chanfro sudoeste
+        [v_(S-k, O), v_(N+k, O)],   // oeste
+        [v_(N+k, O), v_(N, O+k)]    // chanfro noroeste
+    ];
+}
+
+function contornoRetangulo(N, S, O, L) {
+    return [[v_(N,O),v_(N,L)], [v_(N,L),v_(S,L)], [v_(S,L),v_(S,O)], [v_(S,O),v_(N,O)]];
+}
+
+function paredesDoContorno(arestas) {
+    const vistos = new Set();
+    const saida = [];
+    arestas.forEach(([a, b]) => segmentosEntre(a, b).forEach(seg => {
+        const chave = `${seg.row},${seg.col},${seg.side}`;
+        if (!vistos.has(chave)) { vistos.add(chave); saida.push(seg); }
+    }));
+    return saida;
 }
 
 function updatePreview() {
     previewWalls = [];
-    if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
-
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
-    if (currentBrush === 2 || (currentEraseMode && currentBrush === 2)) { 
-        if (isDragging && dragStartNode && dragStartNode.type === 'wall') {
-            const start = dragStartNode;
-
-            // Comparamos CELULA com CELULA. Antes media-se a celula do mouse contra a
-            // coordenada da ARESTA (que pode ser celula+1), o que criava um deslocamento
-            // fantasma de 1: comecando pelos quadrantes de baixo ou da direita, a previa
-            // ja nascia com duas paredes sem o mouse ter saido do lugar.
-            const dR = hoverRow - start.cellRow;
-            const dC = hoverCol - start.cellCol;
-
-            if (Math.abs(dR) === Math.abs(dC) && dR !== 0) {
-                const steps = Math.abs(dR);
-                const rDir = dR > 0 ? 1 : -1;
-                const cDir = dC > 0 ? 1 : -1;
-                for (let i = 0; i <= steps; i++) {
-                    const r = start.cellRow + (i * rDir);
-                    const c = start.cellCol + (i * cDir);
-                    if (r >= 0 && r < 10 && c >= 0 && c < 10) {
-                        if (rDir === cDir) previewWalls.push({ row: r, col: c, side: 'NS' });
-                        else previewWalls.push({ row: r, col: c, side: 'WE' });
-                    }
-                }
-            }
-            // Mouse parado: vale exatamente a aresta que voce clicou, sem reinterpretacao.
-            else if (dR === 0 && dC === 0) {
-                previewWalls.push({ row: start.row, col: start.col, side: start.side });
-            }
-            // Traco reto: a DIRECAO do arrasto escolhe o eixo, e o QUADRANTE clicado
-            // escolhe qual das duas linhas paralelas do grid recebe a parede.
-            else if (Math.abs(dR) >= Math.abs(dC)) {
-                const col = (start.quad === 'NE' || start.quad === 'SE') ? start.cellCol + 1 : start.cellCol;
-                const minR = Math.min(start.cellRow, hoverRow);
-                const maxR = Math.max(start.cellRow, hoverRow);
-                for (let r = minR; r <= maxR; r++)
-                    if (r >= 0 && r < 10 && col >= 0 && col < 10) previewWalls.push({ row: r, col: col, side: 'L' });
-            } else {
-                const row = (start.quad === 'SW' || start.quad === 'SE') ? start.cellRow + 1 : start.cellRow;
-                const minC = Math.min(start.cellCol, hoverCol);
-                const maxC = Math.max(start.cellCol, hoverCol);
-                for (let c = minC; c <= maxC; c++)
-                    if (c >= 0 && c < 10 && row >= 0 && row < 10) previewWalls.push({ row: row, col: c, side: 'R' });
-            }
-        } else if (!isDragging) {
-            const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-            if (edge) previewWalls.push(edge);
+    // PAREDE — modelo ponto A -> linha -> ponto B.
+    // Nao depende de qual celula esta sob o mouse, so dos cantos da grade, entao e
+    // resolvido antes da checagem de hover (que travaria o traco nas bordas).
+    if (currentBrush === 2 || currentBrush === 9) {
+        if (isDragging && verticeA) {
+            verticeB = restringirB(verticeA, verticeHover || verticeA);
+            previewWalls = segmentosEntre(verticeA, verticeB);
+        } else {
+            verticeB = null;
         }
-    } 
-    else if (currentBrush === 3 || (currentEraseMode && currentBrush === 3)) {
+        if (!currentEraseMode) {
+            previewWalls = previewWalls.filter(x => isWallSupported(x.row, x.col, x.side));
+        }
+        return;
+    }
+
+    if (hoverRow < 0 || hoverRow >= GRADE || hoverCol < 0 || hoverCol >= GRADE) return;
+
+    if (currentBrush === 4 || currentBrush === 5) {
+        if (isDragging && dragStartNode && dragStartNode.type === 'room') {
+            const N = Math.min(dragStartNode.row, hoverRow);
+            const S = Math.max(dragStartNode.row, hoverRow) + 1;
+            const O = Math.min(dragStartNode.col, hoverCol);
+            const L = Math.max(dragStartNode.col, hoverCol) + 1;
+            const arestas = (currentBrush === 4)
+                ? contornoTriangulo(N, S, O, L, dragStartNode.row <= hoverRow, dragStartNode.col <= hoverCol)
+                : contornoOctogono(N, S, O, L);
+            previewWalls = paredesDoContorno(arestas);
+        }
+        if (!currentEraseMode) previewWalls = previewWalls.filter(p => isWallSupported(p.row, p.col, p.side));
+        return;
+    }
+
+    if (currentBrush === 3 || (currentEraseMode && currentBrush === 3)) {
         if (isDragging && dragStartNode && dragStartNode.type === 'room') {
             const minR = Math.min(dragStartNode.row, hoverRow);
             const maxR = Math.max(dragStartNode.row, hoverRow);
             const minC = Math.min(dragStartNode.col, hoverCol);
             const maxC = Math.max(dragStartNode.col, hoverCol);
 
-            for (let r = minR; r <= maxR; r++) if (r < 10 && minC < 10) previewWalls.push({ row: r, col: minC, side: 'L' });
-            for (let c = minC; c <= maxC; c++) if (minR < 10 && c < 10) previewWalls.push({ row: minR, col: c, side: 'R' });
-            for (let c = minC; c <= maxC; c++) if (maxR + 1 < 10 && c < 10) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
-            for (let r = minR; r <= maxR; r++) if (r < 10 && maxC + 1 < 10) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
+            for (let r = minR; r <= maxR; r++) previewWalls.push({ row: r, col: minC, side: 'L' });
+            for (let c = minC; c <= maxC; c++) previewWalls.push({ row: minR, col: c, side: 'R' });
+            for (let c = minC; c <= maxC; c++) previewWalls.push({ row: maxR + 1, col: c, side: 'R' });
+            for (let r = minR; r <= maxR; r++) previewWalls.push({ row: r, col: maxC + 1, side: 'L' });
         } else if (!isDragging) {
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'L' });
             previewWalls.push({ row: hoverRow, col: hoverCol, side: 'R' });
-            if (hoverRow + 1 < 10) previewWalls.push({ row: hoverRow + 1, col: hoverCol, side: 'R' });
-            if (hoverCol + 1 < 10) previewWalls.push({ row: hoverRow, col: hoverCol + 1, side: 'L' });
+            previewWalls.push({ row: hoverRow + 1, col: hoverCol, side: 'R' });
+            previewWalls.push({ row: hoverRow, col: hoverCol + 1, side: 'L' });
         }
     }
 
@@ -338,14 +785,18 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     ctx.save();
     const distance = fIndex - currentFloor;
-    ctx.translate(0, -distance * levelHeight);
+    ctx.translate(0, -distance * alturaDoAndar);
 
     const pNorte = gridToScreen(row, col);
     const pLeste = gridToScreen(row, col + 1);
     const pSul   = gridToScreen(row + 1, col + 1);
     const pOeste = gridToScreen(row + 1, col);
 
-    if (renderPass === 0) {
+    // A faixa sentinela existe so para segurar a parede da borda: nao tem chao,
+    // nem grama, nem grade -- se tivesse, o tabuleiro pareceria 11x11.
+    const naMargem = (row === GRADE || col === GRADE);
+
+    if (renderPass === 0 && !naMargem) {
         const hasContent = targetMap[row][col].floor > 0 || targetMap[row][col].wallL > 0 || targetMap[row][col].wallR > 0 || targetMap[row][col].wallWE > 0 || targetMap[row][col].wallNS > 0 || targetMap[row][col].column > 0;
         
         let shouldDrawGrid = false;
@@ -358,48 +809,86 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             shouldDrawGrid = false;
         }
 
+        // MEIO-LADRILHO: numa celula cortada por parede diagonal, o chao nao pode
+        // terminar no quadrado -- tem que terminar na parede.
+        const metade = metadeCache[`${fIndex},${row},${col}`];
+        const temPiso = targetMap[row][col].floor > 0;
+        const dentroPts = poligonoDentro(metade, pNorte, pLeste, pSul, pOeste);
+
         let isDirt = false;
-        if (fIndex <= 0) {
-            if (targetMap[row][col].floor === 0 && !enclosedCache[`${fIndex},${row},${col}`]) {
-                isDirt = true;
+        if (fIndex <= 0 && !temPiso && !enclosedCache[`${fIndex},${row},${col}`]) isDirt = true;
+
+        // A metade que sobrou do lado de fora da diagonal e sempre terra.
+        const temPisoFora = targetMap[row][col].pisoFora > 0;
+        if (metade && (fIndex <= 0 || temPisoFora)) {
+            const imgFora = temPisoFora && !isGhost
+                ? imagemDaTextura(targetMap[row][col].texPisoFora) : null;
+            const fora = poligonoFora(metade, pNorte, pLeste, pSul, pOeste);
+            if (imgFora) {
+                ctx.save();
+                tracarPoligono(fora); ctx.clip();
+                pintarComTextura(imgFora, pNorte,
+                                 { x: pLeste.x - pNorte.x, y: pLeste.y - pNorte.y },
+                                 { x: pOeste.x - pNorte.x, y: pOeste.y - pNorte.y }, null);
+                ctx.restore();
+            } else {
+                ctx.fillStyle = temPisoFora
+                    ? (isGhost ? 'rgba(120, 120, 120, 0.3)' : corPiso)
+                    : dirtColor;
+                tracarPoligono(fora); ctx.fill();
             }
         }
 
         if (isDirt) {
-            ctx.fillStyle = dirtColor; 
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.fill();
-        } else if (targetMap[row][col].floor > 0) {
-            ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : 'rgba(100, 200, 100, 0.6)'; 
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.fill(); 
+            ctx.fillStyle = dirtColor;
+            tracarPoligono(dentroPts); ctx.fill();
+        } else if (temPiso) {
+            const imgPiso = isGhost ? null : imagemDaTextura(targetMap[row][col].texPiso);
+            if (imgPiso) {
+                ctx.save();
+                tracarPoligono(dentroPts); ctx.clip();
+                pintarComTextura(imgPiso, pNorte,
+                                 { x: pLeste.x - pNorte.x, y: pLeste.y - pNorte.y },
+                                 { x: pOeste.x - pNorte.x, y: pOeste.y - pNorte.y }, null);
+                ctx.restore();
+            } else {
+                ctx.fillStyle = isGhost ? 'rgba(120, 120, 120, 0.3)' : corPiso;
+                tracarPoligono(dentroPts); ctx.fill();
+            }
         }
-        
+
         if (shouldDrawGrid) {
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath(); ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555'); ctx.stroke();
+            tracarPoligono(dentroPts);
+            ctx.strokeStyle = isDirt ? 'rgba(255, 255, 255, 0.03)' : (isGhost ? 'rgba(85, 85, 85, 0.15)' : '#555');
+            ctx.stroke();
         }
 
         if (showActiveTools && row === hoverRow && col === hoverCol && !isDragging && currentBrush === 1) {
             const supp = isFloorSupported(row, col);
-            ctx.beginPath(); ctx.moveTo(pNorte.x, pNorte.y); ctx.lineTo(pLeste.x, pLeste.y); ctx.lineTo(pSul.x, pSul.y); ctx.lineTo(pOeste.x, pOeste.y);
-            ctx.closePath();
+            tracarPoligono(dentroPts);
             ctx.fillStyle = (!supp && !activeEraseMode) ? 'rgba(255, 50, 50, 0.3)' : (activeEraseMode ? 'rgba(255, 50, 50, 0.2)' : 'rgba(100, 255, 100, 0.2)');
             ctx.fill();
         }
+    }
 
-        let hL = targetMap[row][col].wallL; if (applyCutaway && hL > 0) hL = cutawayHeight;
-        let hR = targetMap[row][col].wallR; if (applyCutaway && hR > 0) hR = cutawayHeight;
-        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, isGhost ? 'rgba(90, 90, 90, 0.5)' : '#b71c1c'); 
-        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, isGhost ? 'rgba(110, 110, 110, 0.5)' : '#e53935'); 
+    if (renderPass === 0) {
 
-        let hWE = targetMap[row][col].wallWE; if (applyCutaway && hWE > 0) hWE = cutawayHeight;
-        let hNS = targetMap[row][col].wallNS; if (applyCutaway && hNS > 0) hNS = cutawayHeight;
-        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, isGhost ? 'rgba(100, 100, 100, 0.5)' : '#d32f2f'); 
-        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, isGhost ? 'rgba(80, 80, 80, 0.5)' : '#c62828'); 
+        // O corte so rebaixa o que for MAIS ALTO que ele: assim a cerca, que ja e
+        // baixa, continua visivel no modo cortado em vez de sumir.
+        const cel_ = targetMap[row][col];
+        const alturaCortada = (h) => (applyCutaway && h > cutawayHeight) ? cutawayHeight : h;
+        const tom = (cerca, lado, fantasma) => isGhost ? fantasma : (cerca ? corCerca[lado] : corParede[lado]);
 
-        if (targetMap[row][col].column === 1) {
-            let colH = applyCutaway ? cutawayHeight : blockHeight;
+        const hL = alturaCortada(cel_.wallL), hR = alturaCortada(cel_.wallR);
+        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, tom(cel_.cercaL, 'L', 'rgba(90, 90, 90, 0.5)'), isGhost ? null : cel_.texL, 'L');
+        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, tom(cel_.cercaR, 'R', 'rgba(110, 110, 110, 0.5)'), isGhost ? null : cel_.texR, 'R');
+
+        const hWE = alturaCortada(cel_.wallWE), hNS = alturaCortada(cel_.wallNS);
+        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, tom(cel_.cercaWE, 'WE', 'rgba(100, 100, 100, 0.5)'), isGhost ? null : cel_.texWE, 'WE');
+        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, tom(cel_.cercaNS, 'NS', 'rgba(80, 80, 80, 0.5)'), isGhost ? null : cel_.texNS, 'NS');
+
+        if (targetMap[row][col].column > 0) {
+            let colH = applyCutaway ? cutawayHeight : targetMap[row][col].column;
             const cx = pNorte.x; const cy = pNorte.y + (tileHeight / 2);
             
             ctx.fillStyle = isGhost ? 'rgba(130, 130, 130, 0.5)' : '#a3a3a3'; ctx.strokeStyle = isGhost ? 'transparent' : '#555';
@@ -419,9 +908,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             hideLowerRoof = true;
         }
 
-        let isIndoors = enclosedCache[`${fIndex},${row},${col}`];
+        let isIndoors = telhadoCache[`${fIndex},${row},${col}`];
 
-        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors && !hasStructureAbove(fIndex, row, col)) {
+        if (!isCutaway && fIndex >= 0 && !hideLowerRoof && isIndoors) {
             
             let zN = getRoofZ(fIndex, row, col, roofPitch);
             let zNE = getRoofZ(fIndex, row, col + 0.5, roofPitch);
@@ -433,15 +922,21 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             let zNW = getRoofZ(fIndex, row + 0.5, col, roofPitch);
             let zC = getRoofZ(fIndex, row + 0.5, col + 0.5, roofPitch);
 
-            let t_pN = gridToScreen(row, col); t_pN.y -= (blockHeight + zN);
-            let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (blockHeight + zNE);
-            let t_pE = gridToScreen(row, col + 1); t_pE.y -= (blockHeight + zE);
-            let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (blockHeight + zSE);
-            let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (blockHeight + zS);
-            let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (blockHeight + zSW);
-            let t_pW = gridToScreen(row + 1, col); t_pW.y -= (blockHeight + zW);
-            let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (blockHeight + zNW);
-            let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (blockHeight + zC);
+            // O telhado se apoia na parede mais alta que cerca ESTE cômodo.
+            // Com alturas variadas no mesmo tabuleiro, nao existe uma altura global
+            // que sirva: a nave alta e a sala baixa precisam de telhados em niveis
+            // diferentes.
+            const baseTelhado = alturaComodo[`${fIndex},${row},${col}`] || blockHeight;
+
+            let t_pN = gridToScreen(row, col); t_pN.y -= (baseTelhado + zN);
+            let t_pNE = gridToScreen(row, col + 0.5); t_pNE.y -= (baseTelhado + zNE);
+            let t_pE = gridToScreen(row, col + 1); t_pE.y -= (baseTelhado + zE);
+            let t_pSE = gridToScreen(row + 0.5, col + 1); t_pSE.y -= (baseTelhado + zSE);
+            let t_pS = gridToScreen(row + 1, col + 1); t_pS.y -= (baseTelhado + zS);
+            let t_pSW = gridToScreen(row + 1, col + 0.5); t_pSW.y -= (baseTelhado + zSW);
+            let t_pW = gridToScreen(row + 1, col); t_pW.y -= (baseTelhado + zW);
+            let t_pNW = gridToScreen(row + 0.5, col); t_pNW.y -= (baseTelhado + zNW);
+            let t_pC = gridToScreen(row + 0.5, col + 0.5); t_pC.y -= (baseTelhado + zC);
 
             let pN_3d = {x: row, y: col, z: zN};
             let pNE_3d = {x: row, y: col + 0.5, z: zNE};
@@ -456,19 +951,18 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             ctx.save();
             
             ctx.beginPath();
-            ctx.moveTo(pSul.x, pSul.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight); 
-            ctx.lineTo(pLeste.x, pLeste.y - blockHeight - 2000); 
-            ctx.lineTo(pNorte.x, pNorte.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight - 2000); 
-            ctx.lineTo(pOeste.x, pOeste.y - blockHeight); 
+            ctx.moveTo(pSul.x, pSul.y - baseTelhado); 
+            ctx.lineTo(pLeste.x, pLeste.y - baseTelhado); 
+            ctx.lineTo(pLeste.x, pLeste.y - baseTelhado - 2000); 
+            ctx.lineTo(pNorte.x, pNorte.y - baseTelhado - 2000); 
+            ctx.lineTo(pOeste.x, pOeste.y - baseTelhado - 2000); 
+            ctx.lineTo(pOeste.x, pOeste.y - baseTelhado); 
             ctx.closePath();
             ctx.clip();
 
             let neighborHasRoof = (r, c) => {
-                if (r < 0 || r >= 10 || c < 0 || c >= 10) return false;
-                let ind = enclosedCache[`${fIndex},${r},${c}`];
-                return ind && !hasStructureAbove(fIndex, r, c);
+                if (r < 0 || r >= GRADE || c < 0 || c >= GRADE) return false;
+                return !!telhadoCache[`${fIndex},${r},${c}`];
             };
 
             const drawSkirt = (p1_2d, p2_2d, p1_3d, p2_3d, overlay) => {
@@ -491,43 +985,87 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                 ctx.stroke();
             };
 
-            if (!neighborHasRoof(row - 1, col)) { 
-                drawSkirt(t_pN, t_pNE, pN_3d, pNE_3d, 'rgba(0,0,0,0.1)');
-                drawSkirt(t_pNE, t_pE, pNE_3d, pE_3d, 'rgba(0,0,0,0.1)');
+            // MEIO-LADRILHO NO TELHADO.
+            // O ponto central da celula pertence as DUAS diagonais, entao as 8
+            // micro-fatias se dividem exatamente 4 a 4 sobre qualquer um dos cortes.
+            // Numa celula cortada, desenhamos apenas as 4 fatias do lado de dentro.
+            const metadeTel = metadeCache[`${fIndex},${row},${col}`];
+
+            const fatias = [
+                [t_pN,  t_pNE, pN_3d,  pNE_3d], [t_pNE, t_pE,  pNE_3d, pE_3d],
+                [t_pE,  t_pSE, pE_3d,  pSE_3d], [t_pSE, t_pS,  pSE_3d, pS_3d],
+                [t_pS,  t_pSW, pS_3d,  pSW_3d], [t_pSW, t_pW,  pSW_3d, pW_3d],
+                [t_pW,  t_pNW, pW_3d,  pNW_3d], [t_pNW, t_pN,  pNW_3d, pN_3d],
+            ];
+            const sombraSaia = ['rgba(0,0,0,0.1)','rgba(0,0,0,0.1)','rgba(0,0,0,0.4)','rgba(0,0,0,0.4)',
+                                'rgba(255,255,255,0.15)','rgba(255,255,255,0.15)','rgba(0,0,0,0.3)','rgba(0,0,0,0.3)'];
+            const vizinhoDaSaia = [[row-1,col],[row-1,col],[row,col+1],[row,col+1],
+                                   [row+1,col],[row+1,col],[row,col-1],[row,col-1]];
+
+            const indices = metadeTel === 'E' ? [0,1,2,3]
+                          : metadeTel === 'W' ? [4,5,6,7]
+                          : metadeTel === 'N' ? [6,7,0,1]
+                          : metadeTel === 'S' ? [2,3,4,5]
+                          : [0,1,2,3,4,5,6,7];
+
+            for (const i of indices) {
+                const [a2, b2, a3, b3] = fatias[i];
+                const [vr, vc] = vizinhoDaSaia[i];
+                if (!neighborHasRoof(vr, vc)) drawSkirt(a2, b2, a3, b3, sombraSaia[i]);
             }
-            if (!neighborHasRoof(row, col + 1)) { 
-                drawSkirt(t_pE, t_pSE, pE_3d, pSE_3d, 'rgba(0,0,0,0.4)');
-                drawSkirt(t_pSE, t_pS, pSE_3d, pS_3d, 'rgba(0,0,0,0.4)');
-            }
-            if (!neighborHasRoof(row + 1, col)) { 
-                drawSkirt(t_pS, t_pSW, pS_3d, pSW_3d, 'rgba(255,255,255,0.15)');
-                drawSkirt(t_pSW, t_pW, pSW_3d, pW_3d, 'rgba(255,255,255,0.15)');
-            }
-            if (!neighborHasRoof(row, col - 1)) { 
-                drawSkirt(t_pW, t_pNW, pW_3d, pNW_3d, 'rgba(0,0,0,0.3)');
-                drawSkirt(t_pNW, t_pN, pNW_3d, pN_3d, 'rgba(0,0,0,0.3)');
+
+            // Saia ao longo do proprio corte, fechando o vao entre o telhado e a
+            // parede diagonal -- sem ela sobraria uma fresta.
+            if (metadeTel) {
+                const corteVertical = (metadeTel === 'E' || metadeTel === 'W');
+                const q1 = corteVertical ? [t_pN, t_pC, pN_3d, pC_3d] : [t_pW, t_pC, pW_3d, pC_3d];
+                const q2 = corteVertical ? [t_pC, t_pS, pC_3d, pS_3d] : [t_pC, t_pE, pC_3d, pE_3d];
+                drawSkirt(q1[0], q1[1], q1[2], q1[3], 'rgba(0,0,0,0.25)');
+                drawSkirt(q2[0], q2[1], q2[2], q2[3], 'rgba(0,0,0,0.25)');
             }
 
             const drawMicroTri = (p1, p2, p3, p1_3d, p2_3d, p3_3d) => {
                 let overlay = getTriangleShade(p1_3d, p2_3d, p3_3d);
                 if (overlay === 'rgba(0,0,0,0)') return;
-
-                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath(); 
+                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath();
                 ctx.fillStyle = roofColor; ctx.fill();
                 ctx.fillStyle = overlay; ctx.fill();
-                
                 ctx.strokeStyle = roofColor; ctx.lineWidth = 1; ctx.stroke();
-                ctx.strokeStyle = overlay; ctx.lineWidth = 1; ctx.stroke();
+                ctx.strokeStyle = overlay;   ctx.lineWidth = 1; ctx.stroke();
             };
 
-            drawMicroTri(t_pN, t_pNE, t_pC, pN_3d, pNE_3d, pC_3d);
-            drawMicroTri(t_pNE, t_pE, t_pC, pNE_3d, pE_3d, pC_3d);
-            drawMicroTri(t_pE, t_pSE, t_pC, pE_3d, pSE_3d, pC_3d);
-            drawMicroTri(t_pSE, t_pS, t_pC, pSE_3d, pS_3d, pC_3d);
-            drawMicroTri(t_pS, t_pSW, t_pC, pS_3d, pSW_3d, pC_3d);
-            drawMicroTri(t_pSW, t_pW, t_pC, pSW_3d, pW_3d, pC_3d);
-            drawMicroTri(t_pW, t_pNW, t_pC, pW_3d, pNW_3d, pC_3d);
-            drawMicroTri(t_pNW, t_pN, t_pC, pNW_3d, pN_3d, pC_3d);
+            for (const i of indices) {
+                const [a2, b2, a3, b3] = fatias[i];
+                drawMicroTri(a2, b2, t_pC, a3, b3, pC_3d);
+            }
+
+            // CUMEEIRAS E ESPIGOES.
+            // Cada fatia vizinha divide com a seguinte um raio que sai do centro da
+            // celula. Se as duas tem inclinacao diferente, ha uma dobra ali: e onde
+            // duas aguas se encontram. Marcando essas arestas o olho reconstrói a
+            // forma; sem elas o telhado vira uma mancha cinza e o formato so da
+            // para deduzir.
+            const pontos2d = [t_pN, t_pNE, t_pE, t_pSE, t_pS, t_pSW, t_pW, t_pNW];
+            const raioEntre = [1, 2, 3, 4, 5, 6, 7, 0];   // NE, E, SE, S, SW, W, NW, N
+            const normais = fatias.map(([, , a3, b3]) => normalDoTelhado(a3, b3, pC_3d));
+
+            ctx.strokeStyle = 'rgba(12, 16, 22, 0.85)';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            for (const i of indices) {
+                const j = (i + 1) % 8;
+                if (indices.indexOf(j) === -1) continue;   // a vizinha foi recortada pela diagonal
+                const n1 = normais[i], n2 = normais[j];
+                if (!n1 || !n2) continue;
+                if (Math.abs(n1.nx - n2.nx) > 0.02 || Math.abs(n1.ny - n2.ny) > 0.02) {
+                    const ponta = pontos2d[raioEntre[i]];
+                    ctx.beginPath();
+                    ctx.moveTo(t_pC.x, t_pC.y);
+                    ctx.lineTo(ponta.x, ponta.y);
+                    ctx.stroke();
+                }
+            }
+            ctx.lineWidth = 1;
             
             ctx.restore();
         }
@@ -549,9 +1087,10 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         const ghosts = previewWalls.filter(p => p.row === row && p.col === col);
         if (ghosts.length > 0) {
             ctx.globalAlpha = 0.7;
-            const ghostColor = activeEraseMode ? 'rgba(255, 50, 50, 0.8)' : 'rgba(100, 255, 100, 0.8)';
+            const ghostColor = activeEraseMode ? corAcaoApagar : corAcaoConstruir;
             ghosts.forEach(p => {
-                let hGhost = applyCutaway ? cutawayHeight : blockHeight;
+                const hAlvo = (currentBrush === 9) ? alturaCerca() : blockHeight;
+                let hGhost = (applyCutaway && hAlvo > cutawayHeight) ? cutawayHeight : hAlvo;
                 if (p.side === 'L') drawFlatWall(pOeste, pNorte, hGhost, ghostColor);
                 else if (p.side === 'R') drawFlatWall(pNorte, pLeste, hGhost, ghostColor);
                 else if (p.side === 'WE') drawFlatWall(pOeste, pLeste, hGhost, ghostColor);
@@ -564,6 +1103,14 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     ctx.restore();
 }
 
+// Que andares entram na cena. Abaixo do terreo so o nivel atual aparece: a
+// escavacao de baixo nao enxerga a de cima, que e o que faz a passagem secreta
+// ser secreta. Acima, os andares se empilham normalmente.
+function andarVisivel(f) {
+    if (currentFloor < 0) return f === currentFloor;
+    return f >= 0;
+}
+
 function drawIsometricGrid() {
     precalculateRooms(); 
     
@@ -571,17 +1118,18 @@ function drawIsometricGrid() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     ctx.save();
-    ctx.translate(originX, originY);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.scale(camZoom, camZoom);
+    ctx.translate(camX - CENTRO_MAPA.x, camY - CENTRO_MAPA.y);
 
     const floors = Object.keys(mapData).map(Number).sort((a, b) => a - b);
     const currentEraseMode = isDragging ? (dragStartNode && dragStartNode.erase) : isErasing;
 
     let renderQueue = [];
     for (const f of floors) {
-        if (currentFloor < 0 && f >= 0) continue;
-        if (currentFloor >= 0 && f < 0) continue;
-        for (let row = 0; row < 10; row++) {
-            for (let col = 0; col < 10; col++) {
+        if (!andarVisivel(f)) continue;
+        for (let row = 0; row < BORDA; row++) {
+            for (let col = 0; col < BORDA; col++) {
                 renderQueue.push({ r: row, c: col, f: f });
             }
         }
@@ -600,24 +1148,93 @@ function drawIsometricGrid() {
         renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 1);
     }
 
+    // Pontos A e B da ferramenta de parede, sempre por cima da cena.
+    if (currentBrush === 2) {
+        const corA = currentEraseMode ? '#ff6b6b' : '#4ade80';
+        if (isDragging && verticeA) {
+            desenharVertice(verticeA, corA, 7);
+            if (verticeB && (verticeB.row !== verticeA.row || verticeB.col !== verticeA.col)) {
+                desenharVertice(verticeB, '#38bdf8', 7);
+            }
+        } else if (verticeHover) {
+            desenharVertice(verticeHover, 'rgba(255,255,255,0.55)', 5);
+        }
+    }
+
     ctx.restore();
 }
 
+// Em qual lado da parede diagonal o clique caiu.
+function metadeSobOMouse(r, c) {
+    const cel = map[r][c];
+    const { fr, fc } = hoverFracao;
+    if (cel.wallNS > 0) return (fc > fr) ? 'E' : 'W';    // corte de norte a sul
+    if (cel.wallWE > 0) return (fr + fc > 1) ? 'S' : 'N'; // corte de oeste a leste
+    return null;
+}
+
 function applySmartBrush() {
-    if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
+    if (hoverRow < 0 || hoverRow >= GRADE || hoverCol < 0 || hoverCol >= GRADE) return;
     const currentEraseMode = isDragging ? dragStartNode.erase : isErasing;
 
-    if (!isCutaway) return; 
+    // Antes daqui saia um 'return' quando o corte estava desligado: com o telhado
+    // aparecendo, piso e coluna simplesmente nao entravam, sem aviso nenhum.
 
     if (currentBrush === 1) { 
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
-        map[hoverRow][hoverCol].floor = currentEraseMode ? 0 : 1; 
+        const cel = map[hoverRow][hoverCol];
+
+        // Numa celula cortada por parede diagonal, o clique pinta a METADE onde
+        // caiu. Antes so a metade de dentro existia como piso, e o lado de fora
+        // ficava condenado a terra para sempre.
+        const ladoDoMouse = metadeSobOMouse(hoverRow, hoverCol);
+        if (ladoDoMouse) {
+            const dentro = metadeCache[`${currentFloor},${hoverRow},${hoverCol}`];
+            const ehDeFora = dentro && ladoDoMouse !== dentro;
+            if (ehDeFora) cel.pisoFora = currentEraseMode ? 0 : 1;
+            else          cel.floor    = currentEraseMode ? 0 : 1;
+            return;
+        }
+
+        cel.floor = currentEraseMode ? 0 : 1;
+        if (currentEraseMode) cel.pisoFora = 0;
         return; 
     }
     
+    // PINTAR CHAO (7): troca so o acabamento, nunca constroi nem apaga.
+    if (currentBrush === 7) {
+        const cel = map[hoverRow][hoverCol];
+        const nova = currentEraseMode ? null : texturaSelecionada.piso;
+        const ladoDoMouse = metadeSobOMouse(hoverRow, hoverCol);
+        const dentro = metadeCache[`${currentFloor},${hoverRow},${hoverCol}`];
+        if (ladoDoMouse && dentro && ladoDoMouse !== dentro) {
+            if (cel.pisoFora > 0) cel.texPisoFora = nova;
+        } else if (cel.floor > 0) {
+            cel.texPiso = nova;
+        }
+        return;
+    }
+
+    // PINTAR PAREDE (8): a aresta sob o cursor, do mesmo jeito que a parede simples.
+    if (currentBrush === 8) {
+        const cel = map[hoverRow][hoverCol];
+        const nova = currentEraseMode ? null : texturaSelecionada.parede;
+        if (cel.wallWE > 0) { cel.texWE = nova; return; }
+        if (cel.wallNS > 0) { cel.texNS = nova; return; }
+        let aRow = hoverRow, aCol = hoverCol, lado = 'L';
+        if (hoverQuadrant === 'NE') lado = 'R';
+        else if (hoverQuadrant === 'SW') { aRow += 1; lado = 'R'; }
+        else if (hoverQuadrant === 'SE') { aCol += 1; lado = 'L'; }
+        if (aRow >= BORDA || aCol >= BORDA) return;
+        const alvo = map[aRow][aCol];
+        if (lado === 'L' && alvo.wallL > 0) alvo.texL = nova;
+        else if (lado === 'R' && alvo.wallR > 0) alvo.texR = nova;
+        return;
+    }
+
     if (currentBrush === 6) {
         if (!currentEraseMode && !isFloorSupported(hoverRow, hoverCol)) return;
-        map[hoverRow][hoverCol].column = currentEraseMode ? 0 : 1;
+        map[hoverRow][hoverCol].column = currentEraseMode ? 0 : blockHeight;
         return;
     }
 
@@ -631,7 +1248,7 @@ function applySmartBrush() {
     else if (hoverQuadrant === 'SW') { tRow += 1; side = 'R'; }
     else if (hoverQuadrant === 'SE') { tCol += 1; side = 'L'; }
 
-    if (tRow < 10 && tCol < 10 && !isDragging && currentBrush === 2) {
+    if (tRow < BORDA && tCol < BORDA && !isDragging && currentBrush === 2) {
         if (!currentEraseMode && !isWallSupported(tRow, tCol, side)) return;
 
         if (currentEraseMode) {
@@ -659,11 +1276,57 @@ function changeFloor(delta) {
     drawIsometricGrid();
 }
 
+// A paleta mostra o que serve para a ferramenta ativa: chao com chao, parede
+// com parede. Antes esta grade existia no HTML e vivia vazia.
+function montarPaletaTexturas() {
+    const grade = document.getElementById('texturePalette');
+    if (!grade) return;
+    const grupo = currentBrush === 8 ? 'parede' : 'piso';
+    grade.innerHTML = '';
+
+    const limpar = document.createElement('div');
+    limpar.className = 'texture-wrapper';
+    const botaoLimpar = document.createElement('div');
+    botaoLimpar.className = 'texture-btn' + (texturaSelecionada[grupo] ? '' : ' selected');
+    botaoLimpar.style.background = 'repeating-linear-gradient(45deg,#334155,#334155 6px,#1e293b 6px,#1e293b 12px)';
+    botaoLimpar.title = 'Sem textura (volta para a cor)';
+    botaoLimpar.addEventListener('click', () => { texturaSelecionada[grupo] = null; montarPaletaTexturas(); });
+    const rotuloLimpar = document.createElement('div');
+    rotuloLimpar.className = 'texture-label'; rotuloLimpar.innerText = 'Sem textura';
+    limpar.appendChild(botaoLimpar); limpar.appendChild(rotuloLimpar);
+    grade.appendChild(limpar);
+
+    catalogoTexturas.filter(t => t.grupo === grupo).forEach(t => {
+        const caixa = document.createElement('div');
+        caixa.className = 'texture-wrapper';
+        const botao = document.createElement('div');
+        botao.className = 'texture-btn' + (texturaSelecionada[grupo] === t.id ? ' selected' : '');
+        botao.style.backgroundImage = `url(${t.arquivo})`;
+        botao.title = t.nome;
+        botao.addEventListener('click', () => { texturaSelecionada[grupo] = t.id; montarPaletaTexturas(); });
+        const rotulo = document.createElement('div');
+        rotulo.className = 'texture-label'; rotulo.innerText = t.nome;
+        caixa.appendChild(botao); caixa.appendChild(rotulo);
+        grade.appendChild(caixa);
+    });
+
+    const selo = document.getElementById('texturaAtiva');
+    if (selo) {
+        const escolhida = catalogoTexturas.find(t => t.id === texturaSelecionada[grupo]);
+        selo.innerText = escolhida ? escolhida.nome : 'nenhuma';
+    }
+}
+
 function updateUI() {
     document.getElementById('btnPiso').classList.toggle('active', currentBrush === 1 && !isErasing);
     document.getElementById('btnParede').classList.toggle('active', currentBrush === 2 && !isErasing);
     document.getElementById('btnRoomRect').classList.toggle('active', currentBrush === 3 && !isErasing);
     document.getElementById('btnColuna').classList.toggle('active', currentBrush === 6 && !isErasing);
+    document.getElementById('btnRoomTri').classList.toggle('active', currentBrush === 4 && !isErasing);
+    document.getElementById('btnRoomOct').classList.toggle('active', currentBrush === 5 && !isErasing);
+    document.getElementById('btnCerca').classList.toggle('active', currentBrush === 9 && !isErasing);
+    document.getElementById('btnPaintFloor').classList.toggle('active', currentBrush === 7 && !isErasing);
+    document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
@@ -671,11 +1334,23 @@ function updateUI() {
     document.getElementById('floorLabel').innerText = `Andar Atual: ${floorName}`;
 }
 
-document.getElementById('sliderAltura').addEventListener('input', (e) => {
-    blockHeight = parseInt(e.target.value);
-    document.getElementById('valorAltura').innerText = blockHeight;
+function definirAlturaParede(nova) {
+    // Vale para o que vier a seguir. O que ja esta de pe fica como esta --
+    // e isso que permite misturar alturas no mesmo tabuleiro.
+    blockHeight = nova;
+    cutawayHeight = Math.max(6, Math.round(nova * 0.25));
+
+    const rotulo = document.getElementById('valorAltura');
+    if (rotulo) rotulo.innerText = nova;
     updatePreview();
     drawIsometricGrid();
+}
+
+// Catalogo de texturas: carrega assim que a pagina abre.
+carregarCatalogoTexturas();
+
+document.getElementById('sliderAltura').addEventListener('input', (e) => {
+    definirAlturaParede(parseInt(e.target.value));
 });
 
 document.getElementById('roofPitchSelect').addEventListener('change', (e) => {
@@ -702,40 +1377,33 @@ document.getElementById('colorRoof').addEventListener('input', (e) => {
 
 canvas.addEventListener('mousemove', (e) => {
     isErasing = e.ctrlKey || e.metaKey;
-    updateUI(); 
+    updateUI();
 
-    const rect = canvas.getBoundingClientRect();
-    const adjX = (e.clientX - rect.left) - originX;
-    const adjY = (e.clientY - rect.top) - originY;
+    // Ferramenta de parede: o alvo e o canto da grade, nao a celula.
+    if (currentBrush === 2 || currentBrush === 9) verticeHover = screenToVertice(e.clientX, e.clientY);
 
+
+    // Qual celula esta sob o mouse.
+    // Antes isso era feito tracando os 100 losangos no canvas e perguntando
+    // isPointInPath -- caro, e quebraria com zoom, porque o teste depende da
+    // transformacao ativa. Agora invertemos a projecao direto.
     hoverCol = -1; hoverRow = -1; hoverQuadrant = 'none';
+    const g = telaParaGrade(e.clientX, e.clientY);
+    const rInt = Math.floor(g.row), cInt = Math.floor(g.col);
 
-    ctx.save();
-    ctx.translate(originX, originY);
-    for (let row = 0; row < 10; row++) {
-        for (let col = 0; col < 10; col++) {
-            const pN = gridToScreen(row, col);
-            const pE = gridToScreen(row, col + 1);
-            const pS = gridToScreen(row + 1, col + 1);
-            const pW = gridToScreen(row + 1, col);
-            
-            defineTilePath(pN, pE, pS, pW);
-            
-            if (ctx.isPointInPath(e.clientX - rect.left, e.clientY - rect.top)) {
-                hoverRow = row; hoverCol = col;
-                const cX = (col - row) * (tileWidth / 2);
-                const cY = (col + row) * (tileHeight / 2) + (tileHeight / 2);
-                if (adjX < cX && adjY < cY) hoverQuadrant = 'NW';
-                else if (adjX >= cX && adjY < cY) hoverQuadrant = 'NE';
-                else if (adjX < cX && adjY >= cY) hoverQuadrant = 'SW';
-                else hoverQuadrant = 'SE';
-            }
-        }
+    if (rInt >= 0 && rInt < GRADE && cInt >= 0 && cInt < GRADE) {
+        hoverRow = rInt; hoverCol = cInt;
+        // Fracao dentro da celula. As duas comparacoes abaixo sao as mesmas do
+        // codigo antigo, so que em coordenadas de grade: na tela, x cresce com
+        // (col - row) e y cresce com (col + row).
+        const fr = g.row - rInt, fc = g.col - cInt;
+        hoverFracao = { fr, fc };
+        if (fc < fr)  hoverQuadrant = (fc + fr < 1) ? 'NW' : 'SW';
+        else          hoverQuadrant = (fc + fr < 1) ? 'NE' : 'SE';
     }
-    ctx.restore();
 
     if (isDragging) {
-        if (currentBrush === 1 || currentBrush === 6 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+        if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -745,7 +1413,7 @@ canvas.addEventListener('mousemove', (e) => {
 });
 
 canvas.addEventListener('mousedown', (e) => { 
-    if (hoverRow < 0 || hoverRow >= 10 || hoverCol < 0 || hoverCol >= 10) return;
+    if (hoverRow < 0 || hoverRow >= GRADE || hoverCol < 0 || hoverCol >= GRADE) return;
     
     isErasing = e.ctrlKey || e.metaKey;
     updateUI();
@@ -757,8 +1425,22 @@ canvas.addEventListener('mousedown', (e) => {
         const visited = new Set();
         visited.add(`${hoverRow},${hoverCol}`);
 
+        // No andar de cima, a laje so existe sobre o que a sustenta. O
+        // preenchimento e limitado pelo APOIO alem das paredes: assim o Shift
+        // cobre exatamente a pegada do que esta construido embaixo, em vez de
+        // espalhar chao flutuante pelo tabuleiro inteiro.
+        // O Shift cobre a PEGADA do que existe embaixo. O balanco de um ladrilho
+        // continua disponivel, mas so no clique -- senao todo preenchimento sairia
+        // com uma saia de sobra em volta do predio.
+        // Apagando, o preenchimento so atravessa o que TEM chao -- senao, um
+        // Shift+Ctrl no vazio caminhava pelo tabuleiro inteiro e limpava a laje.
+        const podePintar = (r, c) => isErasing
+            ? map[r][c].floor > 0
+            : (currentFloor <= 0 || apoioDireto(currentFloor - 1, r, c));
+
         while(queue.length > 0) {
             const {r, c} = queue.shift();
+            if (!podePintar(r, c)) continue;
             map[r][c].floor = isErasing ? 0 : 1;
 
             // A propagacao e limitada pelas PAREDES (testadas logo abaixo), nunca pelo
@@ -767,13 +1449,13 @@ canvas.addEventListener('mousedown', (e) => {
 
             const wL = map[r][c].wallL > 0; const wR = map[r][c].wallR > 0;
             const wWE = map[r][c].wallWE > 0; const wNS = map[r][c].wallNS > 0;
-            const wL_next = c < 9 && map[r][c+1].wallL > 0;
-            const wR_next = r < 9 && map[r+1][c].wallR > 0;
+            const wL_next = map[r][c+1].wallL > 0;
+            const wR_next = map[r+1][c].wallR > 0;
 
             if (c > 0 && !wL && !wWE && !wNS && !visited.has(`${r},${c-1}`)) { visited.add(`${r},${c-1}`); queue.push({r, c: c-1}); }
-            if (c < 9 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
+            if (c < GRADE - 1 && !wL_next && !wWE && !wNS && !visited.has(`${r},${c+1}`)) { visited.add(`${r},${c+1}`); queue.push({r, c: c+1}); }
             if (r > 0 && !wR && !wWE && !wNS && !visited.has(`${r-1},${c}`)) { visited.add(`${r-1},${c}`); queue.push({r: r-1, c}); }
-            if (r < 9 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
+            if (r < GRADE - 1 && !wR_next && !wWE && !wNS && !visited.has(`${r+1},${c}`)) { visited.add(`${r+1},${c}`); queue.push({r: r+1, c}); }
         }
         drawIsometricGrid();
         return; 
@@ -781,19 +1463,17 @@ canvas.addEventListener('mousedown', (e) => {
 
     isDragging = true; 
     
-    if (currentBrush === 1 || currentBrush === 6) {
-        dragStartNode = { type: currentBrush === 1 ? 'floor' : 'column', row: hoverRow, col: hoverCol, erase: isErasing };
+    if (currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
+        dragStartNode = { type: currentBrush === 1 ? 'floor' : (currentBrush === 6 ? 'column' : 'pintura'), row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
-    } else if (currentBrush === 3) {
+    } else if (currentBrush === 3 || currentBrush === 4 || currentBrush === 5) {
         dragStartNode = { type: 'room', row: hoverRow, col: hoverCol, erase: isErasing };
-    } else {
-        const edge = getTargetEdge(hoverRow, hoverCol, hoverQuadrant);
-        if (edge) dragStartNode = { type: 'wall', row: edge.row, col: edge.col, side: edge.side,
-                                   cellRow: hoverRow, cellCol: hoverCol, quad: hoverQuadrant, erase: isErasing };
-        else if (isErasing) {
-            dragStartNode = { type: 'floor', row: hoverRow, col: hoverCol, erase: isErasing };
-            applySmartBrush();
-        }
+    } else if (currentBrush === 2 || currentBrush === 9) {
+        // Ponto A trava no canto mais proximo do clique.
+        verticeA = screenToVertice(e.clientX, e.clientY);
+        verticeHover = verticeA;
+        verticeB = verticeA;
+        dragStartNode = { type: 'wall', erase: isErasing };
     }
     
     updatePreview();
@@ -803,28 +1483,33 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mouseup', () => { 
     if (isDragging) {
         const eraseMode = dragStartNode.erase;
-        if (currentBrush === 2 || currentBrush === 3) {
+        if ([2, 3, 4, 5, 9].includes(currentBrush)) {
+            const ehCerca = currentBrush === 9;
+            const altura = ehCerca ? alturaCerca() : blockHeight;
             if (!eraseMode) {
                 saveState(); 
                 previewWalls.forEach(p => {
-                    if (p.side === 'L') map[p.row][p.col].wallL = blockHeight;
-                    else if (p.side === 'R') map[p.row][p.col].wallR = blockHeight;
-                    else if (p.side === 'WE') map[p.row][p.col].wallWE = blockHeight;
-                    else if (p.side === 'NS') map[p.row][p.col].wallNS = blockHeight;
+                    const cel = map[p.row][p.col];
+                    if (p.side === 'L') { cel.wallL = altura; cel.cercaL = ehCerca ? 1 : 0; }
+                    else if (p.side === 'R') { cel.wallR = altura; cel.cercaR = ehCerca ? 1 : 0; }
+                    else if (p.side === 'WE') { cel.wallWE = altura; cel.cercaWE = ehCerca ? 1 : 0; }
+                    else if (p.side === 'NS') { cel.wallNS = altura; cel.cercaNS = ehCerca ? 1 : 0; }
                 });
             } else if (eraseMode && dragStartNode && (dragStartNode.type === 'wall' || dragStartNode.type === 'room')) {
                 saveState();
                 previewWalls.forEach(p => {
-                    if (p.side === 'L') map[p.row][p.col].wallL = 0;
-                    else if (p.side === 'R') map[p.row][p.col].wallR = 0;
-                    else if (p.side === 'WE') map[p.row][p.col].wallWE = 0;
-                    else if (p.side === 'NS') map[p.row][p.col].wallNS = 0;
+                    const cel = map[p.row][p.col];
+                    if (p.side === 'L') { cel.wallL = 0; cel.cercaL = 0; }
+                    else if (p.side === 'R') { cel.wallR = 0; cel.cercaR = 0; }
+                    else if (p.side === 'WE') { cel.wallWE = 0; cel.cercaWE = 0; }
+                    else if (p.side === 'NS') { cel.wallNS = 0; cel.cercaNS = 0; }
                 });
             }
         }
     }
     isDragging = false; 
     dragStartNode = null;
+    verticeA = null; verticeB = null;
     updatePreview();
     drawIsometricGrid();
 });
@@ -832,6 +1517,7 @@ canvas.addEventListener('mouseup', () => {
 canvas.addEventListener('mouseleave', () => { 
     isDragging = false; 
     dragStartNode = null;
+    verticeA = null; verticeB = null; verticeHover = null;
     isErasing = false; 
     updateUI();
     updatePreview();
@@ -876,11 +1562,12 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    if (['1','2','3','6'].includes(e.key)) {
+    if (['1','2','3','4','5','6','7','8','9'].includes(e.key)) {
         currentBrush = parseInt(e.key);
         isDragging = false;
         dragStartNode = null;
         updateUI();
+        montarPaletaTexturas();
         updatePreview();
         drawIsometricGrid();
     }
@@ -902,6 +1589,11 @@ document.getElementById('btnPiso').addEventListener('click', () => { currentBrus
 document.getElementById('btnParede').addEventListener('click', () => { currentBrush = 2; updateUI(); });
 document.getElementById('btnRoomRect').addEventListener('click', () => { currentBrush = 3; updateUI(); });
 document.getElementById('btnColuna').addEventListener('click', () => { currentBrush = 6; updateUI(); });
+document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
+document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
+document.getElementById('btnCerca').addEventListener('click', () => { currentBrush = 9; updateUI(); });
+document.getElementById('btnPaintFloor').addEventListener('click', () => { currentBrush = 7; updateUI(); montarPaletaTexturas(); });
+document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); montarPaletaTexturas(); });
 
 document.getElementById('btnCutaway').addEventListener('click', () => { isCutaway = !isCutaway; updateUI(); drawIsometricGrid(); });
 document.getElementById('btnUndo').addEventListener('click', () => { 
@@ -909,11 +1601,82 @@ document.getElementById('btnUndo').addEventListener('click', () => {
     window.dispatchEvent(event);
 });
 
+// ===================== CAMERA: ZOOM E MOVIMENTO =====================
+
+function aplicarZoom(fator, ancoraX, ancoraY) {
+    const antes = camZoom;
+    camZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, camZoom * fator));
+    if (camZoom === antes) return;
+    // Se houver ancora (a roda do mouse), o ponto do mapa sob o cursor fica
+    // parado enquanto o resto aproxima ou afasta.
+    if (ancoraX !== undefined) {
+        const rect = canvas.getBoundingClientRect();
+        camX += (ancoraX - rect.left - canvas.width  / 2) * (1 / camZoom - 1 / antes);
+        camY += (ancoraY - rect.top  - canvas.height / 2) * (1 / camZoom - 1 / antes);
+    }
+    drawIsometricGrid();
+}
+
+document.getElementById('btnZoomIn') ?.addEventListener('click', () => aplicarZoom(1.25));
+document.getElementById('btnZoomOut')?.addEventListener('click', () => aplicarZoom(1 / 1.25));
+
+// Trackpad e roda do mouse. No Mac, pinca chega como wheel com ctrlKey.
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const passo = e.ctrlKey ? 0.02 : 0.0015;
+    aplicarZoom(Math.exp(-e.deltaY * passo), e.clientX, e.clientY);
+}, { passive: false });
+
+// Movimento continuo enquanto a tecla estiver pressionada. So roda enquanto
+// alguma direcao esta ativa -- nao ha laco de animacao permanente.
+const teclasCamera = { w: false, a: false, s: false, d: false };
+let loopCamera = false;
+
+function passoCamera() {
+    const v = 14 / camZoom;   // em zoom fechado, o passo em pixels de tela e o mesmo
+    let mudou = false;
+    if (teclasCamera.w) { camY += v; mudou = true; }
+    if (teclasCamera.s) { camY -= v; mudou = true; }
+    if (teclasCamera.a) { camX += v; mudou = true; }
+    if (teclasCamera.d) { camX -= v; mudou = true; }
+    if (mudou) drawIsometricGrid();
+
+    if (teclasCamera.w || teclasCamera.a || teclasCamera.s || teclasCamera.d) {
+        requestAnimationFrame(passoCamera);
+    } else {
+        loopCamera = false;
+    }
+}
+
+const direcaoDaTecla = {
+    w: 'w', a: 'a', s: 's', d: 'd',
+    arrowup: 'w', arrowleft: 'a', arrowdown: 's', arrowright: 'd',
+};
+
+window.addEventListener('keydown', (e) => {
+    const alvo = (e.target && e.target.tagName || '').toLowerCase();
+    if (alvo === 'input' || alvo === 'select' || alvo === 'textarea') return;
+    const dir = direcaoDaTecla[e.key.toLowerCase()];
+    if (!dir) return;
+    e.preventDefault();
+    teclasCamera[dir] = true;
+    if (!loopCamera) { loopCamera = true; requestAnimationFrame(passoCamera); }
+});
+
+window.addEventListener('keyup', (e) => {
+    const dir = direcaoDaTecla[e.key.toLowerCase()];
+    if (dir) teclasCamera[dir] = false;
+});
+
+// Se a janela perde o foco, nenhuma tecla "fica presa" e a camera nao desliza sozinha.
+window.addEventListener('blur', () => {
+    teclasCamera.w = teclasCamera.a = teclasCamera.s = teclasCamera.d = false;
+});
+
 function resizeCanvas() {
     if (!container) return;
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
-    originX = canvas.width / 2;
     drawIsometricGrid();
 }
 

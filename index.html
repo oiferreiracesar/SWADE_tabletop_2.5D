@@ -1,4 +1,6 @@
-<html lang="pt-BR"><head>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Engine Isométrica 2.5D - Construtor</title>
@@ -83,6 +85,9 @@
             <button id="btnPiso" class="active">Piso (1)</button>
             <button id="btnParede">Parede Simples (2)</button>
             <button id="btnRoomRect">Cômodo Retangular (3)</button>
+            <button id="btnRoomTri">Sala Triangular (4)</button>
+            <button id="btnRoomOct">Sala Octogonal (5)</button>
+            <button id="btnCerca">Cerca / Meia Parede (9)</button>
             <button id="btnColuna">Coluna de Apoio (6)</button>
         </div>
 
@@ -93,6 +98,9 @@
         </div>
 
         <h2>Biblioteca de Texturas</h2>
+        <div style="font-size:0.78rem; color:#94a3b8; margin-bottom:8px;">
+            Ativa: <strong id="texturaAtiva">nenhuma</strong> — a paleta segue a ferramenta (7 chão, 8 parede).
+        </div>
         <div class="texture-grid" id="texturePalette"></div>
 
         <h2>Ações</h2>
@@ -112,7 +120,7 @@
             <select id="roofPitchSelect">
                 <option value="6">Baixo (Estilo Moderno)</option>
                 <option value="12">Médio (Padrão)</option>
-                <option value="24" selected="">Alto (Clássico)</option>
+                <option value="24" selected>Alto (Clássico)</option>
             </select>
         </div>
 
@@ -134,14 +142,14 @@
             <input type="color" id="colorRoof" value="#475569">
         </div>
 
+
     </div>
 
     <!-- O CONTAINER SEGURO -->
     <div id="canvas-container">
-        <canvas id="gameCanvas" width="1392" height="901"></canvas>
+        <canvas id="gameCanvas"></canvas>
     </div>
 
     <script src="script.js"></script>
-
 </body>
 </html>
