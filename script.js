@@ -1,5 +1,5 @@
 const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+let ctx = canvas.getContext('2d');
 const container = document.getElementById('canvas-container');
 
 const tileWidth = 64;
@@ -70,6 +70,20 @@ let surfaceColor = '#1e293b';
 let catalogoTexturas = [];
 const imagensTextura = {};
 let texturaSelecionada = { piso: null, parede: null, telhado: null, agua: null };
+let aberturaSelecionada = 'porta';   // tipo escolhido na biblioteca
+
+// As imagens de objeto entram no mesmo cache, indexadas pelo caminho do arquivo.
+function imagemPorCaminho(caminho) {
+    if (!caminho) return null;
+    const pronta = imagensTextura['@' + caminho];
+    if (pronta) return pronta.completa ? pronta.img : null;
+    const img = new Image();
+    const registro = { img, completa: false };
+    imagensTextura['@' + caminho] = registro;
+    img.onload = () => { registro.completa = true; drawIsometricGrid(); };
+    img.src = caminho;
+    return null;
+}
 
 function imagemDaTextura(id) {
     if (!id) return null;
@@ -237,12 +251,20 @@ function createEmptyMap() {
             // diagonal: a celula cortada tem dois lados, e os dois podem ser piso.
             newMap[i][j] = { floor: 0, wallL: 0, wallR: 0, wallWE: 0, wallNS: 0, column: 0,
                              cercaL: 0, cercaR: 0, cercaWE: 0, cercaNS: 0, pisoFora: 0,
+                             // ABERTURA: objeto que mora NA ARESTA e usa a parede como
+                             // suporte -- porta, arco, portao, janela, passagem secreta.
+                             // A parede continua de pe para a deteccao de cômodo: e essa
+                             // a diferenca entre abertura e buraco.
+                             // null, ou { tipo, estado }.
+                             aberturaL: null, aberturaR: null, aberturaWE: null, aberturaNS: null,
                              texPiso: null, texPisoFora: null,
                              texL: null, texR: null, texWE: null, texNS: null,
                              texTelhado: null, texColuna: null,
                              // agua decorativa: puramente estetica, mas BLOQUEIA a
                              // celula -- nada se constroi por cima, como no The Sims 1
-                             agua: 0, texAgua: null }; 
+                             agua: 0, texAgua: null,
+                             // objeto em cena: { id, giro }
+                             objeto: null }; 
         }
     }
     return newMap;
@@ -278,7 +300,186 @@ function defineTilePath(pNorte, pLeste, pSul, pOeste) {
     ctx.closePath();
 }
 
-function drawFlatWall(p1, p2, height, color, textura, face) {
+// Um ponto na face da parede, por fracao do comprimento (t) e da altura (h).
+// Tudo o que e desenhado na parede -- vao, folha, barra, peitoril -- sai daqui,
+// entao funciona igual na aresta reta e na diagonal.
+function pontoNaParede(p1, p2, altura, t, h) {
+    return { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t - altura * h };
+}
+
+// O contorno do vao, em pares (t, h). O arco ganha alguns pontos a mais no topo.
+function contornoDoVao(tipo, altura) {
+    const [larg, alt] = tipo.vao;
+    const base = tipo.peitoril || 0;
+    const topo = base + alt;
+    const t0 = (1 - larg) / 2, t1 = 1 - t0;
+    const pts = [[t0, base]];
+
+    if (tipo.arredondado) {
+        const meio = (t0 + t1) / 2, raio = (t1 - t0) / 2;
+        const retaAte = topo - raio * 0.55;
+        pts.push([t0, retaAte]);
+        for (let i = 1; i <= 7; i++) {
+            const ang = Math.PI * (i / 8);
+            pts.push([meio - Math.cos(ang) * raio, retaAte + Math.sin(ang) * raio * 0.55]);
+        }
+        pts.push([t1, retaAte]);
+    } else {
+        pts.push([t0, topo], [t1, topo]);
+    }
+    pts.push([t1, base]);
+    return pts;
+}
+
+function tracarVao(p1, p2, altura, tipo) {
+    const pts = contornoDoVao(tipo, altura).map(([t, h]) => pontoNaParede(p1, p2, altura, t, h));
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    return pts;
+}
+
+// A folha, as grades, o vidro. Desenhados DENTRO do vao ja recortado.
+function desenharFolha(p1, p2, altura, tipo, abertura, face) {
+    const [larg, alt] = tipo.vao;
+    const base = tipo.peitoril || 0;
+    const topo = base + alt;
+    const t0 = (1 - larg) / 2, t1 = 1 - t0;
+    const escura = face === 'L' || face === 'NS';
+    const P = (t, h) => pontoNaParede(p1, p2, altura, t, h);
+    const poligono = (cantos) => {
+        ctx.beginPath();
+        cantos.forEach((c, i) => { const p = P(c[0], c[1]); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+        ctx.closePath();
+    };
+
+    // porta aberta: so a folha encostada na lateral, e o vao livre
+    const aberta = abertura.estado === 'aberta';
+
+    if (tipo.folha === 'madeira' || tipo.folha === 'dupla') {
+        const img = imagemDaTextura(catalogoTexturas.find(x => x.id.startsWith('tabua'))?.id);
+        const pintar = (a, b) => {
+            poligono([[a, base], [a, topo], [b, topo], [b, base]]);
+            if (img) {
+                ctx.save(); ctx.clip();
+                pintarComTextura(img, P(a, topo), { x: P(b, topo).x - P(a, topo).x, y: P(b, topo).y - P(a, topo).y },
+                                 { x: 0, y: altura * (topo - base) }, null);
+                ctx.restore();
+            } else {
+                ctx.fillStyle = escura ? '#5b4630' : '#7d6244';
+                ctx.fill();
+            }
+            ctx.fillStyle = escura ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.12)';
+            poligono([[a, base], [a, topo], [b, topo], [b, base]]); ctx.fill();
+        };
+
+        if (aberta) {
+            pintar(t0, t0 + (t1 - t0) * 0.14);        // folha encostada na lateral
+            if (tipo.folha === 'dupla') pintar(t1 - (t1 - t0) * 0.14, t1);
+        } else if (tipo.folha === 'dupla') {
+            pintar(t0, (t0 + t1) / 2 - 0.004);
+            pintar((t0 + t1) / 2 + 0.004, t1);
+        } else {
+            pintar(t0, t1);
+            // macaneta
+            const m = P(t1 - (t1 - t0) * 0.18, base + alt * 0.45);
+            ctx.beginPath(); ctx.arc(m.x, m.y, Math.max(1.2, 2 / camZoom), 0, Math.PI * 2);
+            ctx.fillStyle = '#d8c48a'; ctx.fill();
+        }
+
+        if (abertura.estado === 'trancada') {
+            // uma tranca atravessada: o estado precisa ser visivel, nao adivinhado
+            const a = P(t0 + 0.04, base + alt * 0.52), b = P(t1 - 0.04, base + alt * 0.52);
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = '#c9a227'; ctx.lineWidth = Math.max(1.5, 2.5 / camZoom); ctx.stroke();
+        }
+        return;
+    }
+
+    if (tipo.folha === 'grades') {
+        if (aberta) return;
+        const barras = 5;
+        ctx.strokeStyle = escura ? '#3c4550' : '#5b6673';
+        ctx.lineWidth = Math.max(1.2, 2.2 / camZoom);
+        for (let i = 1; i <= barras; i++) {
+            const t = t0 + (t1 - t0) * (i / (barras + 1));
+            const a = P(t, base), b = P(t, topo);
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+        const e = P(t0, base + alt * 0.55), d = P(t1, base + alt * 0.55);
+        ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(d.x, d.y); ctx.stroke();
+        if (abertura.estado === 'trancada') {
+            const m = P((t0 + t1) / 2, base + alt * 0.5);
+            ctx.beginPath(); ctx.arc(m.x, m.y, Math.max(1.6, 3 / camZoom), 0, Math.PI * 2);
+            ctx.fillStyle = '#c9a227'; ctx.fill();
+        }
+        return;
+    }
+
+    if (tipo.folha === 'vidro') {
+        poligono([[t0, base], [t0, topo], [t1, topo], [t1, base]]);
+        ctx.fillStyle = escura ? 'rgba(140, 190, 215, 0.22)' : 'rgba(190, 225, 240, 0.30)';
+        ctx.fill();
+        const cima = P((t0 + t1) / 2, topo), baixo = P((t0 + t1) / 2, base);
+        ctx.beginPath(); ctx.moveTo(cima.x, cima.y); ctx.lineTo(baixo.x, baixo.y);
+        ctx.strokeStyle = 'rgba(20, 30, 40, 0.5)'; ctx.lineWidth = Math.max(1, 1.6 / camZoom); ctx.stroke();
+    }
+}
+
+// A passagem secreta nao tem vao: ela e desenhada como parede inteira, com uma
+// marca discreta que so faz sentido para quem esta construindo.
+function marcarSecreta(p1, p2, altura, estado) {
+    const tipo = tipoDaAbertura('secreta');
+    ctx.save();
+    ctx.setLineDash([4 / camZoom, 4 / camZoom]);
+    ctx.beginPath();
+    tracarVao(p1, p2, altura, tipo);
+    ctx.strokeStyle = estado === 'aberta' ? 'rgba(220, 180, 90, 0.9)' : 'rgba(210, 190, 140, 0.45)';
+    ctx.lineWidth = Math.max(1, 1.4 / camZoom);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawFlatWall(p1, p2, height, color, textura, face, abertura) {
+    if (abertura) {
+        const tipo = tipoDaAbertura(abertura.tipo);
+
+        // Secreta: parede inteira, sem vao. So a marca de construcao denuncia.
+        if (tipo.id === 'secreta' && abertura.estado !== 'aberta') {
+            drawFlatWall(p1, p2, height, color, textura, face, null);
+            marcarSecreta(p1, p2, height, abertura.estado);
+            return;
+        }
+
+        // A parede e desenhada com o vao recortado (regra par-impar), entao a
+        // textura e o veu da face continuam valendo, sem costura.
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(p2.x, p2.y - height); ctx.lineTo(p1.x, p1.y - height);
+        ctx.closePath();
+        tracarVao(p1, p2, height, tipo);
+        ctx.clip('evenodd');
+        drawFlatWall(p1, p2, height, color, textura, face, null);
+        ctx.restore();
+
+        // batente
+        ctx.save();
+        ctx.beginPath(); tracarVao(p1, p2, height, tipo);
+        ctx.strokeStyle = 'rgba(12, 18, 26, 0.75)';
+        ctx.lineWidth = Math.max(1, 1.6 / camZoom);
+        ctx.stroke();
+        ctx.restore();
+
+        // folha, grades ou vidro, dentro do vao
+        ctx.save();
+        ctx.beginPath(); tracarVao(p1, p2, height, tipo); ctx.clip();
+        desenharFolha(p1, p2, height, tipo, abertura, face);
+        ctx.restore();
+
+        if (tipo.id === 'secreta') marcarSecreta(p1, p2, height, abertura.estado);
+        return;
+    }
     const img = imagemDaTextura(textura);
     if (img) {
         pintarComTextura(img, { x: p1.x, y: p1.y },
@@ -799,6 +1000,91 @@ function desenharVertice(v, cor, raio) {
 }
 
 
+// ===================== OBJETOS EM CENA =====================
+//
+// Objeto e sprite: imagem pronta, nao geometria. E a escolha certa aqui pelo
+// mesmo motivo que fez o Sims 1 inteiro ser sprite -- uma cadeira desenhada em
+// codigo fica pobre. O preco e o giro: com a camera girando, cada objeto com
+// frente e costas precisa de quatro vistas. Objeto simetrico se vira com uma.
+
+let catalogoObjetos = [];
+let objetoSelecionado = null;
+
+function carregarCatalogoObjetos() {
+    fetch('objetos/manifesto.json')
+        .then(r => r.ok ? r.json() : null)
+        .then(dados => {
+            if (!dados) return;
+            catalogoObjetos = dados.objetos || [];
+            if (!objetoSelecionado && catalogoObjetos.length) objetoSelecionado = catalogoObjetos[0].id;
+            montarPaletaTexturas();
+            drawIsometricGrid();
+        })
+        .catch(() => { /* sem catalogo, a ferramenta fica vazia e o resto segue */ });
+}
+
+function objetoDoCatalogo(id) {
+    return catalogoObjetos.find(o => o.id === id) || null;
+}
+
+// A vista depende do giro do OBJETO somado ao giro da CAMERA: o bau vira junto
+// com a casa, e nao junto com a tela.
+function vistaDoObjeto(obj, item) {
+    const vistas = item.vistas || [];
+    if (!vistas.length) return null;
+    const i = ((obj.giro || 0) + rotacao) % vistas.length;
+    return vistas[i];
+}
+
+// ===================== ABERTURAS =====================
+//
+// No The Sims 1 a porta nao era parte da parede: era um OBJETO colocado na
+// aresta, que cortava a parede no desenho e virava um portal para o motor de
+// rota. E esse o modelo aqui -- e por isso janela, portao e passagem secreta
+// cabem na mesma estrutura, mudando so duas perguntas: passa? ve atraves?
+//
+// As duas flags ainda nao tem consumidor (nao ha fichas no tabuleiro), mas sao
+// baratas agora e caras depois: guardadas desde ja, o dia do movimento nao
+// exige revisitar cada abertura desenhada ate la.
+
+const TIPOS_DE_ABERTURA = [
+    { id: 'porta',   nome: 'Porta',          vao: [0.42, 0.72], folha: 'madeira',
+      estados: ['fechada', 'aberta', 'trancada'] },
+    { id: 'dupla',   nome: 'Porta dupla',    vao: [0.64, 0.78], folha: 'dupla',
+      estados: ['fechada', 'aberta', 'trancada'] },
+    { id: 'arco',    nome: 'Arco',           vao: [0.52, 0.80], folha: 'nenhuma', arredondado: true,
+      estados: ['aberta'] },
+    { id: 'portao',  nome: 'Portão de grades', vao: [0.46, 0.74], folha: 'grades',
+      estados: ['fechada', 'aberta', 'trancada'] },
+    { id: 'janela',  nome: 'Janela',         vao: [0.50, 0.42], peitoril: 0.34, folha: 'vidro',
+      estados: ['fechada'] },
+    { id: 'secreta', nome: 'Passagem secreta', vao: [0.40, 0.70], folha: 'oculta',
+      estados: ['secreta', 'aberta'] },
+];
+
+function tipoDaAbertura(id) {
+    return TIPOS_DE_ABERTURA.find(t => t.id === id) || TIPOS_DE_ABERTURA[0];
+}
+
+// Passa alguem por aqui? (para quando houver fichas no tabuleiro)
+function aberturaDeixaPassar(ab) {
+    if (!ab) return false;
+    const t = tipoDaAbertura(ab.tipo);
+    if (t.id === 'janela') return false;              // janela nunca e passagem
+    if (ab.estado === 'trancada') return false;
+    if (ab.estado === 'secreta') return false;        // enquanto nao for descoberta
+    return true;
+}
+
+// Da para ver atraves? (linha de visao)
+function aberturaDeixaVer(ab) {
+    if (!ab) return false;
+    const t = tipoDaAbertura(ab.tipo);
+    if (t.id === 'arco' || t.id === 'janela' || t.id === 'portao') return true;
+    if (t.id === 'secreta') return ab.estado === 'aberta';
+    return ab.estado === 'aberta';                    // porta e porta dupla
+}
+
 // ===================== AGUA ANIMADA =====================
 //
 // A agua nao e uma imagem: e desenhada a cada quadro. Duas familias de ondas
@@ -981,7 +1267,7 @@ function arestaDosVertices(a, b) {
 function girarAndar(m) {
     const novo = createEmptyMap();
     const campos = ['floor', 'pisoFora', 'column', 'texPiso', 'texPisoFora',
-                    'texTelhado', 'texColuna', 'agua', 'texAgua'];
+                    'texTelhado', 'texColuna', 'agua', 'texAgua', 'objeto'];
 
     for (let r = 0; r < GRADE; r++) {
         for (let c = 0; c < GRADE; c++) {
@@ -1003,6 +1289,7 @@ function girarAndar(m) {
                 alvo['wall' + nova.lado] = altura;
                 alvo['cerca' + nova.lado] = m[r][c]['cerca' + lado];
                 alvo['tex' + nova.lado] = m[r][c]['tex' + lado];
+                alvo['abertura' + nova.lado] = m[r][c]['abertura' + lado];
             }
         }
     }
@@ -1160,6 +1447,28 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
     // nem grama, nem grade -- se tivesse, o tabuleiro pareceria 11x11.
     const naMargem = (row === GRADE || col === GRADE);
 
+    // OBJETO EM CENA: desenhado depois das paredes da propria celula e antes das
+    // celulas mais a frente -- a fila de profundidade ja resolve quem tampa quem.
+    if (renderPass === 0 && !naMargem && targetMap[row][col].objeto) {
+        const obj = targetMap[row][col].objeto;
+        const item = objetoDoCatalogo(obj.id);
+        if (item) {
+            const img = imagemPorCaminho(vistaDoObjeto(obj, item));
+            if (img) {
+                const centro = gridToScreen(row + 0.5, col + 0.5);
+                const larguraLadrilhos = (item.ladrilhos && item.ladrilhos[0]) || 1;
+                // 0,88 do ladrilho: um bau ocupa o ladrilho sem transbordar para o vizinho
+                const largura = tileWidth * larguraLadrilhos * 0.88;
+                const altura = largura * (img.height / img.width);
+                ctx.globalAlpha = isGhost ? 0.45 : 1;
+                // o pe do objeto assenta no CENTRO do ladrilho
+                ctx.drawImage(img, centro.x - largura / 2, centro.y - altura + tileHeight * 0.28,
+                              largura, altura);
+                ctx.globalAlpha = 1;
+            }
+        }
+    }
+
     // O passe 2 desenha SO o chao, e roda antes da agua; a estrutura vem depois,
     // no passe 0. E isso que faz o lago ficar POR CIMA da grama em vez de abrir
     // buracos escuros nos ladrilhos que ele encosta.
@@ -1295,12 +1604,12 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         const tom = (cerca, lado, fantasma) => isGhost ? fantasma : (cerca ? corCerca[lado] : corParede[lado]);
 
         const hL = alturaCortada(cel_.wallL), hR = alturaCortada(cel_.wallR);
-        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, tom(cel_.cercaL, 'L', 'rgba(90, 90, 90, 0.5)'), isGhost ? null : cel_.texL, 'L');
-        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, tom(cel_.cercaR, 'R', 'rgba(110, 110, 110, 0.5)'), isGhost ? null : cel_.texR, 'R');
+        if (hL > 0) drawFlatWall(pOeste, pNorte, hL, tom(cel_.cercaL, 'L', 'rgba(90, 90, 90, 0.5)'), isGhost ? null : cel_.texL, 'L', cel_.aberturaL);
+        if (hR > 0) drawFlatWall(pNorte, pLeste, hR, tom(cel_.cercaR, 'R', 'rgba(110, 110, 110, 0.5)'), isGhost ? null : cel_.texR, 'R', cel_.aberturaR);
 
         const hWE = alturaCortada(cel_.wallWE), hNS = alturaCortada(cel_.wallNS);
-        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, tom(cel_.cercaWE, 'WE', 'rgba(100, 100, 100, 0.5)'), isGhost ? null : cel_.texWE, 'WE');
-        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, tom(cel_.cercaNS, 'NS', 'rgba(80, 80, 80, 0.5)'), isGhost ? null : cel_.texNS, 'NS');
+        if (hWE > 0) drawFlatWall(pOeste, pLeste, hWE, tom(cel_.cercaWE, 'WE', 'rgba(100, 100, 100, 0.5)'), isGhost ? null : cel_.texWE, 'WE', cel_.aberturaWE);
+        if (hNS > 0) drawFlatWall(pNorte, pSul, hNS, tom(cel_.cercaNS, 'NS', 'rgba(80, 80, 80, 0.5)'), isGhost ? null : cel_.texNS, 'NS', cel_.aberturaNS);
 
         if (targetMap[row][col].column > 0) {
             let colH = applyCutaway ? cutawayHeight : targetMap[row][col].column;
@@ -1738,6 +2047,54 @@ function applySmartBrush() {
         return;
     }
 
+    // PORTA (P): marca o vao numa parede que ja existe. Nao constroi parede nem
+    // apaga: so decide se aquele trecho tem passagem.
+    // OBJETO (O): coloca o escolhido; clicar de novo gira 90 graus; Ctrl tira.
+    if (currentBrush === 11) {
+        const cel = map[hoverRow][hoverCol];
+        if (currentEraseMode) { cel.objeto = null; return; }
+        if (!objetoSelecionado) return;
+        if (cel.objeto && cel.objeto.id === objetoSelecionado) {
+            const item = objetoDoCatalogo(cel.objeto.id);
+            const quantas = (item && item.vistas.length) || 1;
+            cel.objeto.giro = ((cel.objeto.giro || 0) + 1) % quantas;
+            return;
+        }
+        cel.objeto = { id: objetoSelecionado, giro: 0 };
+        return;
+    }
+
+    if (currentBrush === 10) {
+        const escolher = (celula, lado) => {
+            if (celula['wall' + lado] <= 0) return;
+            if (currentEraseMode) { celula['abertura' + lado] = null; return; }
+
+            const tipo = tipoDaAbertura(aberturaSelecionada);
+            const atual = celula['abertura' + lado];
+
+            // Clicar de novo no mesmo tipo passa ao proximo estado: fechada ->
+            // aberta -> trancada. E assim que o mestre mexe na mesa, sem menu.
+            if (atual && atual.tipo === tipo.id) {
+                const i = tipo.estados.indexOf(atual.estado);
+                atual.estado = tipo.estados[(i + 1) % tipo.estados.length];
+                return;
+            }
+            celula['abertura' + lado] = { tipo: tipo.id, estado: tipo.estados[0] };
+        };
+
+        const cel = map[hoverRow][hoverCol];
+        if (cel.wallWE > 0) { escolher(cel, 'WE'); return; }
+        if (cel.wallNS > 0) { escolher(cel, 'NS'); return; }
+
+        let aRow = hoverRow, aCol = hoverCol, lado = 'L';
+        if (hoverQuadrant === 'NE') lado = 'R';
+        else if (hoverQuadrant === 'SW') { aRow += 1; lado = 'R'; }
+        else if (hoverQuadrant === 'SE') { aCol += 1; lado = 'L'; }
+        if (aRow >= BORDA || aCol >= BORDA) return;
+        escolher(map[aRow][aCol], lado);
+        return;
+    }
+
     // PINTAR TELHADO (7): a agua e do cômodo inteiro, nao de um ladrilho, entao
     // um clique pinta o cômodo sob o cursor de uma vez.
     if (currentBrush === 7) {
@@ -1814,10 +2171,33 @@ function changeFloor(delta) {
 // A paleta mostra o que serve para a ferramenta ativa: chao com chao, parede
 // com parede. Antes esta grade existia no HTML e vivia vazia.
 function grupoDaFerramenta() {
+    if (currentBrush === 11) return 'objeto';
+    if (currentBrush === 10) return 'abertura';
     if (currentBrush === 8) return 'parede';
     if (currentBrush === 7) return 'telhado';
     if (currentBrush === 0) return 'agua';
     return 'piso';
+}
+
+// Amostra da abertura para a biblioteca: um pedaco de parede reta, desenhado
+// numa tela de lado, com a propria funcao que desenha no tabuleiro. Assim a
+// amostra nunca mente sobre o resultado.
+function amostraDaAbertura(tipo) {
+    const tela = document.createElement('canvas');
+    tela.width = 64; tela.height = 64;
+    const guardado = ctx;
+    const g = tela.getContext('2d');
+    g.fillStyle = '#8d8272'; g.fillRect(0, 0, 64, 64);
+    try {
+        ctx = g;
+        const zoomGuardado = camZoom; camZoom = 1;
+        drawFlatWall({ x: 4, y: 60 }, { x: 60, y: 60 }, 52, '#a2977f', null, 'R',
+                     { tipo: tipo.id, estado: tipo.estados[0] });
+        camZoom = zoomGuardado;
+    } finally {
+        ctx = guardado;
+    }
+    return tela.toDataURL();
 }
 
 function montarPaletaTexturas() {
@@ -1837,6 +2217,55 @@ function montarPaletaTexturas() {
     rotuloLimpar.className = 'texture-label'; rotuloLimpar.innerText = 'Sem textura';
     limpar.appendChild(botaoLimpar); limpar.appendChild(rotuloLimpar);
     grade.appendChild(limpar);
+
+    if (grupo === 'objeto') {
+        if (!catalogoObjetos.length) {
+            const aviso = document.createElement('div');
+            aviso.className = 'texture-categoria';
+            aviso.innerText = 'nenhum objeto no catálogo';
+            grade.appendChild(aviso);
+            return;
+        }
+        catalogoObjetos.forEach(item => {
+            const caixa = document.createElement('div');
+            caixa.className = 'texture-wrapper';
+            const botao = document.createElement('div');
+            botao.className = 'texture-btn' + (objetoSelecionado === item.id ? ' selected' : '');
+            botao.style.backgroundImage = `url(${item.vistas[0]})`;
+            botao.style.backgroundSize = 'contain';
+            botao.style.backgroundRepeat = 'no-repeat';
+            botao.style.backgroundPosition = 'center';
+            botao.title = item.nome;
+            botao.addEventListener('click', () => { objetoSelecionado = item.id; montarPaletaTexturas(); });
+            const rotulo = document.createElement('div');
+            rotulo.className = 'texture-label'; rotulo.innerText = item.nome;
+            caixa.appendChild(botao); caixa.appendChild(rotulo);
+            grade.appendChild(caixa);
+        });
+        atualizarSeloDaTextura();
+        return;
+    }
+
+    // As aberturas tambem nao vem de arquivo: a amostra e a propria abertura,
+    // desenhada num pedaco de parede.
+    if (grupo === 'abertura') {
+        TIPOS_DE_ABERTURA.forEach(tipo => {
+            const caixa = document.createElement('div');
+            caixa.className = 'texture-wrapper';
+            const botao = document.createElement('div');
+            botao.className = 'texture-btn' + (aberturaSelecionada === tipo.id ? ' selected' : '');
+            botao.style.backgroundImage = `url(${amostraDaAbertura(tipo)})`;
+            botao.style.backgroundSize = 'cover';
+            botao.title = tipo.nome;
+            botao.addEventListener('click', () => { aberturaSelecionada = tipo.id; montarPaletaTexturas(); });
+            const rotulo = document.createElement('div');
+            rotulo.className = 'texture-label'; rotulo.innerText = tipo.nome;
+            caixa.appendChild(botao); caixa.appendChild(rotulo);
+            grade.appendChild(caixa);
+        });
+        atualizarSeloDaTextura();
+        return;
+    }
 
     // A agua nao vem de arquivo: e desenhada. A amostra da paleta e um quadro
     // do proprio efeito, congelado.
@@ -1898,6 +2327,15 @@ function atualizarSeloDaTextura() {
     const selo = document.getElementById('texturaAtiva');
     if (!selo) return;
     const grupo = grupoDaFerramenta();
+    if (grupo === 'objeto') {
+        const item = objetoDoCatalogo(objetoSelecionado);
+        selo.innerText = item ? item.nome : 'nenhum';
+        return;
+    }
+    if (grupo === 'abertura') {
+        selo.innerText = tipoDaAbertura(aberturaSelecionada).nome;
+        return;
+    }
     if (grupo === 'agua') {
         const e = ESTILOS_DE_AGUA.find(x => x.id === texturaSelecionada.agua);
         selo.innerText = e ? e.nome : 'nenhuma';
@@ -1918,6 +2356,8 @@ function updateUI() {
     document.getElementById('btnPaintRoof').classList.toggle('active', currentBrush === 7 && !isErasing);
     document.getElementById('btnPaintWall').classList.toggle('active', currentBrush === 8 && !isErasing);
     document.getElementById('btnAgua').classList.toggle('active', currentBrush === 0 && !isErasing);
+    document.getElementById('btnPorta').classList.toggle('active', currentBrush === 10 && !isErasing);
+    document.getElementById('btnObjeto').classList.toggle('active', currentBrush === 11 && !isErasing);
     document.getElementById('btnBorracha').classList.toggle('active', isErasing);
     document.getElementById('btnCutaway').innerText = isCutaway ? 'Paredes: CORTADAS (C)' : 'Paredes: INTEIRAS (C)';
 
@@ -1939,6 +2379,7 @@ function definirAlturaParede(nova) {
 
 // Catalogo de texturas: carrega assim que a pagina abre.
 carregarCatalogoTexturas();
+carregarCatalogoObjetos();
 
 document.getElementById('sliderAltura').addEventListener('input', (e) => {
     definirAlturaParede(parseInt(e.target.value));
@@ -2003,7 +2444,7 @@ canvas.addEventListener('mousemove', (e) => {
     }
 
     if (isDragging) {
-        if (currentBrush === 0 || currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
+        if (currentBrush === 0 || currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || currentBrush === 10 || currentBrush === 11 || (dragStartNode && dragStartNode.erase && dragStartNode.type === 'floor')) {
             applySmartBrush(); 
         }
     }
@@ -2134,7 +2575,7 @@ canvas.addEventListener('mousedown', (e) => {
 
     isDragging = true; 
     
-    if (currentBrush === 0 || currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8) {
+    if (currentBrush === 0 || currentBrush === 1 || currentBrush === 6 || currentBrush === 7 || currentBrush === 8 || currentBrush === 10 || currentBrush === 11) {
         dragStartNode = { type: currentBrush === 1 ? 'floor' : (currentBrush === 6 ? 'column' : (currentBrush === 0 ? 'agua' : 'pintura')), row: hoverRow, col: hoverCol, erase: isErasing };
         applySmartBrush(); 
     } else if (currentBrush === 3 || currentBrush === 4 || currentBrush === 5) {
@@ -2209,6 +2650,18 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
+    if (e.key === 'o' || e.key === 'O') {
+        currentBrush = 11;
+        updateUI(); montarPaletaTexturas(); updatePreview(); drawIsometricGrid();
+        return;
+    }
+
+    if (e.key === 'p' || e.key === 'P') {
+        currentBrush = 10;
+        updateUI(); montarPaletaTexturas(); updatePreview(); drawIsometricGrid();
+        return;
+    }
+
     if (e.key === 'q' || e.key === 'Q') { girarCamera(-1); return; }
     if (e.key === 'e' || e.key === 'E') { girarCamera(1); return; }
 
@@ -2267,6 +2720,8 @@ document.getElementById('btnColuna').addEventListener('click', () => { currentBr
 document.getElementById('btnRoomTri').addEventListener('click', () => { currentBrush = 4; updateUI(); });
 document.getElementById('btnRoomOct').addEventListener('click', () => { currentBrush = 5; updateUI(); });
 document.getElementById('btnCerca').addEventListener('click', () => { currentBrush = 9; updateUI(); });
+document.getElementById('btnObjeto').addEventListener('click', () => { currentBrush = 11; updateUI(); montarPaletaTexturas(); });
+document.getElementById('btnPorta').addEventListener('click', () => { currentBrush = 10; updateUI(); });
 document.getElementById('btnAgua').addEventListener('click', () => { currentBrush = 0; updateUI(); montarPaletaTexturas(); });
 document.getElementById('btnPaintRoof').addEventListener('click', () => { currentBrush = 7; updateUI(); montarPaletaTexturas(); });
 document.getElementById('btnPaintWall').addEventListener('click', () => { currentBrush = 8; updateUI(); montarPaletaTexturas(); });

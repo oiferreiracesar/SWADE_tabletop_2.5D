@@ -1014,6 +1014,144 @@ function checa(nome, passou, detalhe = '') {
         `estilo escolhido viaja na pincelada=${agua.estiloGuardado} · não aceita piso nem parede=${agua.semApoio} · ` +
         `o preenchimento não atravessa o rio=${agua.naoAtravessa} · o giro leva a água junto=${agua.giroOk}`);
 
+  // T37 — abertura: objeto na aresta que continua fechando o cômodo, com estado
+  // e com as duas perguntas que o movimento vai fazer (passa? vê através?)
+  const abertura = await page.evaluate(() => {
+    const cv = document.getElementById('gameCanvas'), rec = cv.getBoundingClientRect();
+    const pos = (row, col) => { const g = gridToScreen(row, col), t = worldParaTela(g.x, g.y);
+      return { x: rec.left + t.x, y: rec.top + t.y }; };
+    const ev = (t, pt, extra) => cv.dispatchEvent(new MouseEvent(t,
+      Object.assign({ clientX: pt.x, clientY: pt.y, bubbles: true }, extra || {})));
+    const clique = (pt, extra) => { ev('mousemove', pt, extra); ev('mousedown', pt, extra); ev('mouseup', pt, extra); };
+
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    definirAlturaParede(48); isCutaway = true; rotacao = 0; pinceladasDeAgua = [];
+
+    for (let r = 2; r <= 5; r++) { map[r][2].wallL = 48; map[r][6].wallL = 48; }
+    for (let c = 2; c <= 5; c++) { map[2][c].wallR = 48; map[6][c].wallR = 48; }
+    for (let r = 2; r <= 5; r++) for (let c = 2; c <= 5; c++) map[r][c].floor = 1;
+    precalculateRooms();
+    const fechadoAntes = enclosedCache['0,3,3'] === true && telhadoCache['0,3,3'] === true;
+
+    // porta pelo clique, na parede norte da célula (2,3)
+    document.getElementById('btnPorta').click();
+    aberturaSelecionada = 'porta';
+    clique(pos(2.2, 3.5));
+    const posta = map[2][3].aberturaR && map[2][3].aberturaR.tipo === 'porta'
+               && map[2][3].aberturaR.estado === 'fechada';
+
+    precalculateRooms();
+    const continuaFechado = enclosedCache['0,3,3'] === true && telhadoCache['0,3,3'] === true;
+
+    // clicar de novo cicla o estado: fechada -> aberta -> trancada
+    clique(pos(2.2, 3.5)); const virouAberta = map[2][3].aberturaR.estado === 'aberta';
+    clique(pos(2.2, 3.5)); const virouTrancada = map[2][3].aberturaR.estado === 'trancada';
+
+    // as duas perguntas do movimento
+    const porta = map[2][3].aberturaR;
+    const trancadaNaoPassa = aberturaDeixaPassar(porta) === false;
+    porta.estado = 'aberta';
+    const abertaPassaEVe = aberturaDeixaPassar(porta) && aberturaDeixaVer(porta);
+    porta.estado = 'fechada';
+    const fechadaPassaMasNaoVe = aberturaDeixaPassar(porta) && aberturaDeixaVer(porta) === false;
+
+    // janela: vê mas não passa. secreta: nem uma coisa nem outra, até abrir
+    const janela = { tipo: 'janela', estado: 'fechada' };
+    const janelaOk = aberturaDeixaPassar(janela) === false && aberturaDeixaVer(janela) === true;
+    const secreta = { tipo: 'secreta', estado: 'secreta' };
+    const secretaOk = aberturaDeixaPassar(secreta) === false && aberturaDeixaVer(secreta) === false;
+    secreta.estado = 'aberta';
+    const secretaAbreOk = aberturaDeixaPassar(secreta) === true;
+
+    // o buraco de verdade, para comparar
+    map[2][3].wallR = 0; precalculateRooms();
+    const buracoAbre = enclosedCache['0,3,3'] === false;
+    map[2][3].wallR = 48;
+
+    // não inventa parede onde não há
+    clique(pos(8.2, 8.5));
+    const naoInventa = map[8][8].wallR === 0 && !map[8][8].aberturaR;
+
+    // Ctrl remove a abertura e deixa a parede
+    clique(pos(2.2, 3.5), { ctrlKey: true });
+    const removida = !map[2][3].aberturaR && map[2][3].wallR === 48;
+
+    // e ela viaja no giro
+    map[2][3].aberturaR = { tipo: 'portao', estado: 'fechada' };
+    girarCamera(1);
+    let achadas = 0, tipoCerto = false;
+    for (let r = 0; r < BORDA; r++) for (let c = 0; c < BORDA; c++)
+      for (const lado of ['L', 'R', 'WE', 'NS']) {
+        const ab = map[r][c]['abertura' + lado];
+        if (ab) { achadas++; tipoCerto = ab.tipo === 'portao'; }
+      }
+
+    return { fechadoAntes, posta, continuaFechado, virouAberta, virouTrancada,
+             trancadaNaoPassa, abertaPassaEVe, fechadaPassaMasNaoVe,
+             janelaOk, secretaOk, secretaAbreOk, buracoAbre, naoInventa, removida,
+             giroLevou: achadas === 1 && tipoCerto };
+  });
+  const abOk = Object.values(abertura).every(Boolean);
+  checa('Abertura: porta com estado, e as flags de passagem e visão', abOk,
+        `porta posta e cômodo segue fechado=${abertura.posta && abertura.continuaFechado} · ` +
+        `clique cicla fechada→aberta→trancada=${abertura.virouAberta && abertura.virouTrancada} · ` +
+        `trancada não passa=${abertura.trancadaNaoPassa} · fechada passa mas não se vê através=${abertura.fechadaPassaMasNaoVe} · ` +
+        `janela vê e não passa=${abertura.janelaOk} · secreta só passa depois de aberta=${abertura.secretaOk && abertura.secretaAbreOk} · ` +
+        `buraco de verdade abre o cômodo=${abertura.buracoAbre} · Ctrl remove só a abertura=${abertura.removida} · ` +
+        `giro leva junto=${abertura.giroLevou}`);
+
+  // T38 — objeto em cena: sprite colocado, girado e removido; e a vista segue a câmera
+  const objeto = await page.evaluate(async () => {
+    for (let i = 0; i < 40 && catalogoObjetos.length === 0; i++) await new Promise(r => setTimeout(r, 50));
+    const cv = document.getElementById('gameCanvas'), rec = cv.getBoundingClientRect();
+    const pos = (row, col) => { const g = gridToScreen(row, col), t = worldParaTela(g.x, g.y);
+      return { x: rec.left + t.x, y: rec.top + t.y }; };
+    const ev = (t, pt, extra) => cv.dispatchEvent(new MouseEvent(t,
+      Object.assign({ clientX: pt.x, clientY: pt.y, bubbles: true }, extra || {})));
+    const clique = (pt, extra) => { ev('mousemove', pt, extra); ev('mousedown', pt, extra); ev('mouseup', pt, extra); };
+
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    definirAlturaParede(48); isCutaway = true; rotacao = 0; pinceladasDeAgua = [];
+
+    const item = catalogoObjetos[0];
+    document.getElementById('btnObjeto').click();
+    objetoSelecionado = item.id;
+
+    clique(pos(4.5, 4.5));
+    const posto = map[4][4].objeto && map[4][4].objeto.id === item.id && map[4][4].objeto.giro === 0;
+
+    // clicar de novo gira o objeto
+    clique(pos(4.5, 4.5));
+    const girou = map[4][4].objeto.giro === 1;
+
+    // a vista desenhada soma o giro do objeto ao giro da câmera
+    const vistaAntes = vistaDoObjeto(map[4][4].objeto, item);
+    girarCamera(1);
+    // depois do giro do tabuleiro, o objeto mudou de célula
+    let achado = null, onde = null;
+    for (let r = 0; r < GRADE; r++) for (let c = 0; c < GRADE; c++)
+      if (map[r][c].objeto) { achado = map[r][c].objeto; onde = [r, c]; }
+    const vistaDepois = achado ? vistaDoObjeto(achado, item) : null;
+    const sobreviveuAoGiro = !!achado && achado.id === item.id;
+    const vistaMudou = item.vistas.length > 1 ? vistaAntes !== vistaDepois : true;
+
+    // Ctrl remove
+    rotacao = 0;
+    mapData = { 0: createEmptyMap() }; map = mapData[0];
+    clique(pos(4.5, 4.5));
+    clique(pos(4.5, 4.5), { ctrlKey: true });
+    const removido = !map[4][4].objeto;
+
+    return { catalogo: catalogoObjetos.length > 0, posto, girou,
+             sobreviveuAoGiro, vistaMudou, removido,
+             temQuatroVistas: item.vistas.length === 4 };
+  });
+  const objOk = Object.values(objeto).every(Boolean);
+  checa('Objeto em cena: colocado, girado, removido e acompanhando a câmera', objOk,
+        `catálogo carregado=${objeto.catalogo} · posto pelo clique=${objeto.posto} · ` +
+        `clique de novo gira=${objeto.girou} · sobrevive ao giro do tabuleiro=${objeto.sobreviveuAoGiro} · ` +
+        `a vista desenhada muda com a câmera=${objeto.vistaMudou} · Ctrl remove=${objeto.removido}`);
+
   await browser.close();
   srv.close();
 
