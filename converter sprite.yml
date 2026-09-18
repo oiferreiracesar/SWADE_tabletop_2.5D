@@ -1,0 +1,152 @@
+name: Converter sprite
+
+# Como usar:
+#   1. Suba a folha gerada pela IA para a pasta folhas/ (Add file -> Upload files)
+#   2. Aba Actions -> "Converter sprite" -> Run workflow
+#   3. Preencha o formulario e rode. Os .webp e o manifesto.json sao gravados
+#      no repositorio automaticamente.
+
+on:
+  workflow_dispatch:
+    inputs:
+      folha:
+        description: 'Arquivo da folha dentro de folhas/ (deixe vazio se houver so um)'
+        required: false
+        default: ''
+      id:
+        description: 'Id do objeto, sem acento nem espaco (ex.: barril)'
+        required: true
+      nome:
+        description: 'Nome que aparece na biblioteca (ex.: Barril)'
+        required: true
+      categoria:
+        description: 'Gaveta da biblioteca (ex.: Masmorra, Taverna, Moveis)'
+        required: false
+        default: 'Geral'
+      ladrilhos:
+        description: 'Quantos losangos ocupa: 1x1, 1x2, 2x2'
+        required: false
+        default: '1x1'
+      livre:
+        description: 'NAO bloqueia o ladrilho (tapete, poca, marca no chao)'
+        type: boolean
+        required: false
+        default: false
+      espelhar:
+        description: 'Completa 4 vistas espelhando. SO para objeto simetrico'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  converter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar as bibliotecas
+        run: pip install pillow numpy
+
+      - name: Escolher a folha
+        id: folha
+        run: |
+          set -euo pipefail
+          escolhida="${{ inputs.folha }}"
+          if [ -z "$escolhida" ]; then
+            achadas=$(find folhas -maxdepth 1 -type f \
+              \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | sort)
+            quantas=$(printf '%s\n' "$achadas" | grep -c . || true)
+            if [ "$quantas" -eq 0 ]; then
+              echo "::error::Nenhuma imagem em folhas/. Suba a folha primeiro (Add file -> Upload files)."
+              exit 1
+            fi
+            if [ "$quantas" -gt 1 ]; then
+              echo "::error::Ha $quantas imagens em folhas/. Diga qual no campo 'folha':"
+              printf '%s\n' "$achadas"
+              exit 1
+            fi
+            escolhida="$achadas"
+          else
+            case "$escolhida" in folhas/*) ;; *) escolhida="folhas/$escolhida" ;; esac
+            if [ ! -f "$escolhida" ]; then
+              echo "::error::Nao achei $escolhida. O que existe em folhas/:"
+              ls -1 folhas/ || true
+              exit 1
+            fi
+          fi
+          echo "caminho=$escolhida" >> "$GITHUB_OUTPUT"
+          echo "Folha: $escolhida"
+
+      - name: Converter
+        id: converter
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "${{ inputs.livre }}" = "true" ]; then extra="$extra --livre"; fi
+          if [ "${{ inputs.espelhar }}" = "true" ]; then extra="$extra --espelhar"; fi
+          python3 ferramentas/converter-sprites.py "${{ steps.folha.outputs.caminho }}" \
+            --id "${{ inputs.id }}" \
+            --nome "${{ inputs.nome }}" \
+            --categoria "${{ inputs.categoria }}" \
+            --ladrilhos "${{ inputs.ladrilhos }}" \
+            $extra | tee saida.txt
+
+      - name: Montar a tira de conferencia
+        run: |
+          python3 - <<'PY'
+          import glob, os
+          from PIL import Image
+          vistas = sorted(glob.glob(os.path.join('objetos', '${{ inputs.id }}-*.webp')))
+          ims = [Image.open(v).convert('RGBA') for v in vistas]
+          if ims:
+              W = sum(i.width for i in ims); H = max(i.height for i in ims)
+              tira = Image.new('RGBA', (W, H), (35, 32, 45, 255))
+              x = 0
+              for i in ims:
+                  tira.alpha_composite(i, (x, H - i.height)); x += i.width
+              tira.convert('RGB').save('conferencia.png')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conferencia-${{ inputs.id }}
+          path: conferencia.png
+          if-no-files-found: warn
+
+      - name: Resumo
+        run: |
+          {
+            echo "## ${{ inputs.nome }} (\`${{ inputs.id }}\`)"
+            echo
+            echo '```'
+            cat saida.txt
+            echo '```'
+            echo
+            if grep -q 'AVISO' saida.txt; then
+              echo '> **Confira antes de usar.** O conversor achou as vistas parecidas demais.'
+              echo '> Em objeto em forma de caixa isso costuma ser alarme falso; em objeto de'
+              echo '> forma irregular, a folha precisa ser regerada.'
+            fi
+            echo
+            echo 'Baixe **conferencia-${{ inputs.id }}** no fim desta pagina para ver as vistas recortadas lado a lado.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gravar no repositorio
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add objetos/
+          if git diff --cached --quiet; then
+            echo 'Nada mudou.'
+            exit 0
+          fi
+          git commit -m "Sprite: ${{ inputs.nome }} (${{ inputs.id }})"
+          git push
