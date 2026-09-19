@@ -1,0 +1,938 @@
+<title>Conversor de Sprites</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Public+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+  :root{
+    --papel:#F7F4EE; --superficie:#FFFFFF; --tinta:#26211B; --fraca:#6E655A;
+    --linha:#E0D8CA; --latao:#8F6117; --latao-fraco:#F0E3CC; --sobre-latao:#FFFFFF;
+    --alerta:#A03A26; --alerta-fraco:#F7E4DF; --ok:#356446; --ok-fraco:#E2EFE6;
+    --vazio:#2A251F;
+    --r:10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --papel:#15120E; --superficie:#1F1A14; --tinta:#EFE8DC; --fraca:#A09585;
+      --linha:#332C23; --latao:#DCA54F; --latao-fraco:#2A2116; --sobre-latao:#1A1509;
+      --alerta:#E08067; --alerta-fraco:#3A241E; --ok:#78BC8E; --ok-fraco:#1E2F24;
+      --vazio:#0C0A08;
+    }
+  }
+  :root[data-theme="dark"]{
+    --papel:#15120E; --superficie:#1F1A14; --tinta:#EFE8DC; --fraca:#A09585;
+    --linha:#332C23; --latao:#DCA54F; --latao-fraco:#2A2116; --sobre-latao:#1A1509;
+    --alerta:#E08067; --alerta-fraco:#3A241E; --ok:#78BC8E; --ok-fraco:#1E2F24;
+    --vazio:#0C0A08;
+  }
+  *{box-sizing:border-box}
+  body{
+    background:var(--papel); color:var(--tinta);
+    font:400 15px/1.55 "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    margin:0;
+  }
+  .folha{max-width:1080px; margin:0 auto; padding-inline:20px; padding-block:40px 64px}
+  h1{
+    font:700 clamp(30px,5vw,44px)/1.05 "Fraunces", Georgia, serif;
+    letter-spacing:-.02em; margin:0 0 10px; text-wrap:balance;
+  }
+  .sub{color:var(--fraca); max-width:62ch; margin:0 0 34px}
+  h2{font:700 13px/1.2 "Public Sans",sans-serif; text-transform:uppercase;
+     letter-spacing:.11em; color:var(--fraca); margin:0 0 14px}
+  .cartao{background:var(--superficie); border:1px solid var(--linha);
+          border-radius:var(--r); padding:22px}
+  code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.9em;
+       background:var(--latao-fraco); padding:1px 5px; border-radius:4px}
+
+  .solta{
+    border:2px dashed var(--linha); border-radius:var(--r); background:var(--superficie);
+    padding:30px 22px; text-align:center; cursor:pointer; display:block;
+    transition:border-color .15s, background .15s;
+  }
+  .solta:hover,.solta:focus-visible{border-color:var(--latao)}
+  .solta.sobre{border-color:var(--latao); background:var(--latao-fraco)}
+  .solta strong{display:block; font-size:17px; margin-bottom:4px}
+  .solta span{color:var(--fraca); font-size:14px}
+  input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+
+  .colunas{display:grid; grid-template-columns:minmax(0,300px) minmax(0,1fr);
+           gap:22px; align-items:start; margin-top:22px}
+  @media (max-width:760px){ .colunas{grid-template-columns:1fr} }
+
+  label{display:block; font-size:13px; font-weight:500; margin-bottom:5px}
+  .dica{font-weight:400; color:var(--fraca)}
+  input[type=text], select{
+    width:100%; padding:9px 11px; border:1px solid var(--linha); border-radius:7px;
+    background:var(--papel); color:var(--tinta); font:inherit; font-size:14px;
+  }
+  input[type=text]:focus-visible, select:focus-visible{outline:2px solid var(--latao); outline-offset:1px}
+  .campo{margin-bottom:15px}
+  .caixa{display:flex; gap:9px; align-items:flex-start; margin-bottom:13px}
+  .caixa input{margin:3px 0 0; accent-color:var(--latao); flex:none}
+  .caixa label{margin:0}
+
+  button{
+    font:600 14px/1 "Public Sans",sans-serif; padding:11px 16px; border-radius:7px;
+    border:1px solid var(--linha); background:var(--papel); color:var(--tinta); cursor:pointer;
+  }
+  button:hover{border-color:var(--latao)}
+  button:focus-visible{outline:2px solid var(--latao); outline-offset:1px}
+  button.principal{background:var(--latao); border-color:var(--latao); color:var(--sobre-latao)}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  .botoes{display:flex; flex-wrap:wrap; gap:9px; margin-top:16px}
+
+  .palco{
+    background:var(--vazio); border-radius:var(--r); padding:16px; overflow-x:auto;
+    border:1px solid var(--linha);
+  }
+  .palco canvas{display:block; max-width:100%; height:auto}
+  .vistas{display:flex; gap:12px; flex-wrap:wrap; margin-top:14px}
+  .vista{text-align:center}
+  .vista canvas{background:var(--vazio); border-radius:6px; display:block;
+                max-width:110px; height:auto}
+  .vista b{display:block; font:600 11px/1.6 "IBM Plex Mono",monospace; color:var(--fraca)}
+
+  table{border-collapse:collapse; width:100%; font-size:13px; margin-top:6px}
+  th,td{text-align:left; padding:6px 9px; border-bottom:1px solid var(--linha)}
+  th{font-weight:600; color:var(--fraca); font-size:11px; text-transform:uppercase; letter-spacing:.07em}
+  td.n{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
+  .rolar{overflow-x:auto}
+
+  .selo{display:inline-block; font:600 11px/1 "Public Sans",sans-serif; padding:6px 10px;
+        border-radius:99px; letter-spacing:.03em}
+  .selo.bom{background:var(--ok-fraco); color:var(--ok)}
+  .selo.ruim{background:var(--alerta-fraco); color:var(--alerta)}
+
+  .aviso{border-left:3px solid var(--alerta); background:var(--alerta-fraco);
+         padding:12px 14px; border-radius:0 7px 7px 0; margin-top:16px; font-size:14px}
+  .aviso b{display:block; margin-bottom:3px}
+  .nota{color:var(--fraca); font-size:13px; margin-top:12px}
+  .leitura{font:400 12.5px/1.65 "IBM Plex Mono",monospace; color:var(--fraca);
+           white-space:pre-wrap; margin:14px 0 0}
+  .estado{margin-top:14px; font-size:14px; color:var(--fraca); min-height:1.2em}
+  .rodape{margin-top:46px; padding-top:20px; border-top:1px solid var(--linha);
+          color:var(--fraca); font-size:13.5px}
+  .rodape p{max-width:70ch}
+  .pasta{margin-top:18px; padding-top:18px; border-top:1px solid var(--linha)}
+  .pasta p{margin:0 0 12px; font-size:13.5px; color:var(--fraca)}
+  .destino{font:600 12.5px/1.5 "IBM Plex Mono",monospace; color:var(--ok);
+           background:var(--ok-fraco); padding:7px 10px; border-radius:6px;
+           display:inline-block; margin:0 0 12px}
+  @media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+</style>
+
+<div class="folha">
+  <h1>Conversor de Sprites</h1>
+  <p class="sub">Recorta o fundo de chroma key de uma folha de vistas, separa cada ângulo,
+  alinha, redimensiona e devolve os <code>.webp</code> mais a ficha do objeto, prontos
+  para o tabuleiro 2.5D. Tudo acontece dentro desta página — nenhuma imagem sai do
+  seu computador.</p>
+
+  <label class="solta" id="solta" tabindex="0">
+    <strong>Arraste a folha aqui</strong>
+    <span>ou clique para escolher — PNG, JPG ou WEBP, com fundo verde, magenta, azul ou ciano</span>
+    <input type="file" id="arquivo" accept="image/*">
+  </label>
+
+  <div class="colunas">
+    <div class="cartao">
+      <h2>O objeto</h2>
+      <div class="campo">
+        <label for="id">Id <span class="dica">— sem acento nem espaço</span></label>
+        <input type="text" id="id" value="bau" spellcheck="false">
+      </div>
+      <div class="campo">
+        <label for="nome">Nome na biblioteca</label>
+        <input type="text" id="nome" value="Baú">
+      </div>
+      <div class="campo">
+        <label for="categoria">Categoria</label>
+        <input type="text" id="categoria" value="Masmorra">
+      </div>
+      <div class="campo">
+        <label for="ladrilhos">Ladrilhos que ocupa</label>
+        <select id="ladrilhos">
+          <option>1x1</option><option>1x2</option><option>2x1</option><option>2x2</option>
+        </select>
+      </div>
+      <div class="caixa">
+        <input type="checkbox" id="livre">
+        <label for="livre">Não bloqueia o ladrilho
+          <span class="dica">tapete, poça, marca no chão</span></label>
+      </div>
+      <div class="caixa">
+        <input type="checkbox" id="espelhar">
+        <label for="espelhar">Completar 4 vistas espelhando
+          <span class="dica">só para objeto simétrico</span></label>
+      </div>
+      <div class="botoes">
+        <button class="principal" id="converter">Converter</button>
+      </div>
+      <p class="estado" id="estado"></p>
+    </div>
+
+    <div class="cartao">
+      <h2>Conferência</h2>
+      <div class="palco"><canvas id="tira"></canvas></div>
+      <div class="vistas" id="vistas"></div>
+      <p class="leitura" id="leitura"></p>
+      <div id="diagnostico"></div>
+      <div class="botoes" id="baixar" hidden>
+        <button class="principal" id="zip">Baixar tudo (.zip)</button>
+        <button id="ficha">Baixar só a ficha (.json)</button>
+      </div>
+      <p class="nota" id="nota-salvar" hidden></p>
+
+      <div class="pasta" id="pasta" hidden>
+        <p><b>Gravar direto na pasta do projeto.</b> Escolha a pasta
+        <code>objetos/</code> uma vez e os arquivos passam a ser gravados lá —
+        sem baixar zip, sem descompactar. O catálogo se remonta junto.</p>
+        <p class="destino" id="destino" hidden></p>
+        <div class="botoes">
+          <button id="escolher-pasta">Escolher a pasta objetos/</button>
+          <button class="principal" id="gravar" hidden>Gravar na pasta</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rodape">
+    <p><b>Onde os arquivos vão.</b> Descompacte o <code>.zip</code> por cima da pasta do
+    projeto: ele já traz <code>objetos/</code> com as vistas e a ficha do objeto.</p>
+    <p><b>Cada objeto tem a sua ficha</b> — <code>objetos/barril.json</code> — e o
+    catálogo é a soma delas, remontado sozinho. Nenhum arquivo é compartilhado entre
+    dois objetos, então subir um novo nunca apaga os que já estavam lá. Você não
+    precisa carregar nada antes de converter.</p>
+    <p><b>O que o recorte faz.</b> A borda do objeto vira meio-transparente em vez de
+    serrilhada; um detalhe da mesma cor do fundo sobrevive se estiver dentro do objeto; e o
+    reflexo da cor do fundo é neutralizado numa faixa colada ao contorno.</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const CHROMAS = {
+  verde:   [0, 255, 0],
+  magenta: [255, 0, 255],
+  azul:    [0, 0, 255],
+  ciano:   [0, 255, 255],
+};
+const CANAIS_DO_CHROMA = { verde: [1], magenta: [0, 2], azul: [2], ciano: [1, 2] };
+const LARGURA_POR_LADRILHO = 160;
+const EXEMPLO = "data:image/webp;base64,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";
+
+const $ = (s) => document.querySelector(s);
+const estado = $("#estado");
+let folhaAtual = null;
+let nomeFolha = "exemplo.webp";
+let resultado = null;
+
+/* ---------- utilidades ---------- */
+
+function imagemParaDados(img) {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth || img.width;
+  c.height = img.naturalHeight || img.height;
+  const cx = c.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(img, 0, 0);
+  return cx.getImageData(0, 0, c.width, c.height);
+}
+
+function carregarImagem(src) {
+  return new Promise((ok, erro) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => erro(new Error("não consegui abrir a imagem"));
+    img.src = src;
+  });
+}
+
+const respirar = () => new Promise((r) => setTimeout(r, 16));
+
+/* ---------- 1. achar o fundo ---------- */
+
+function identificarChroma(d) {
+  const { width: w, height: h, data: p } = d;
+  const rs = [], gs = [], bs = [];
+  const amostra = (x, y) => {
+    const i = (y * w + x) * 4;
+    rs.push(p[i]); gs.push(p[i + 1]); bs.push(p[i + 2]);
+  };
+  for (let x = 0; x < w; x++) { amostra(x, 0); amostra(x, h - 1); }
+  for (let y = 0; y < h; y++) { amostra(0, y); amostra(w - 1, y); }
+  const mediana = (a) => { a.sort((x, y) => x - y); return a[a.length >> 1]; };
+  const m = [mediana(rs), mediana(gs), mediana(bs)];
+  for (const nome of Object.keys(CHROMAS)) {
+    const cor = CHROMAS[nome];
+    if (Math.abs(m[0] - cor[0]) <= 60 && Math.abs(m[1] - cor[1]) <= 60 &&
+        Math.abs(m[2] - cor[2]) <= 60) return { nome, cor };
+  }
+  return { nome: null, cor: null };
+}
+
+// Fundo = casa com alguma amostra E está ligado à borda da imagem. É a ligação
+// com a borda que protege um detalhe da mesma cor dentro do objeto.
+function inundarDaBorda(d, amostras, tol) {
+  const { width: w, height: h, data: p } = d;
+  const fundo = new Uint8Array(w * h);
+  const fila = new Int32Array(w * h);
+  let ini = 0, fim = 0;
+  const casa = (i) => {
+    const r = p[i * 4], g = p[i * 4 + 1], b = p[i * 4 + 2];
+    for (let k = 0; k < amostras.length; k++) {
+      const a = amostras[k];
+      if (Math.abs(r - a[0]) <= tol && Math.abs(g - a[1]) <= tol && Math.abs(b - a[2]) <= tol)
+        return true;
+    }
+    return false;
+  };
+  const semear = (i) => { if (!fundo[i] && casa(i)) { fundo[i] = 1; fila[fim++] = i; } };
+  for (let x = 0; x < w; x++) { semear(x); semear((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { semear(y * w); semear(y * w + w - 1); }
+  while (ini < fim) {
+    const i = fila[ini++], x = i % w, y = (i / w) | 0;
+    if (x > 0) semear(i - 1);
+    if (x < w - 1) semear(i + 1);
+    if (y > 0) semear(i - w);
+    if (y < h - 1) semear(i + w);
+  }
+  return fundo;
+}
+
+function dilatar(mascara, w, h, passos) {
+  let atual = mascara;
+  for (let k = 0; k < passos; k++) {
+    const prox = atual.slice();
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (atual[i]) continue;
+      if ((x > 0 && atual[i - 1]) || (x < w - 1 && atual[i + 1]) ||
+          (y > 0 && atual[i - w]) || (y < h - 1 && atual[i + w])) prox[i] = 1;
+    }
+    atual = prox;
+  }
+  return atual;
+}
+
+function acharFundo(d) {
+  const { width: w, height: h, data: p } = d;
+  const saida = new Uint8ClampedArray(p);
+  const { nome, cor } = identificarChroma(d);
+
+  if (nome) {
+    const perto = 70, longe = 150;
+    const alfa = new Float32Array(w * h);
+    const ligado = inundarDaBorda(d, [cor], 90);
+    for (let i = 0; i < w * h; i++) {
+      if (!ligado[i]) { alfa[i] = 1; continue; }
+      const dr = p[i * 4] - cor[0], dg = p[i * 4 + 1] - cor[1], db = p[i * 4 + 2] - cor[2];
+      const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+      alfa[i] = Math.min(1, Math.max(0, (dist - perto) / (longe - perto)));
+    }
+    // A faixa do derrame é "perto do fundo", não só "alfa parcial": o reflexo da
+    // cor de fundo passa de onde o alfa já é cheio.
+    const faixa0 = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++)
+      faixa0[i] = (ligado[i] || (alfa[i] > 0.02 && alfa[i] < 0.98)) ? 1 : 0;
+    const faixa = dilatar(faixa0, w, h, 4);
+
+    const canais = CANAIS_DO_CHROMA[nome];
+    for (let i = 0; i < w * h; i++) {
+      if (faixa[i]) {
+        for (let k = 0; k < canais.length; k++) {
+          const c = canais[k], o1 = (c + 1) % 3, o2 = (c + 2) % 3;
+          const teto = (p[i * 4 + o1] + p[i * 4 + o2]) / 2;
+          if (p[i * 4 + c] > teto) saida[i * 4 + c] = teto;
+        }
+      }
+      saida[i * 4 + 3] = Math.round(alfa[i] * 255);
+    }
+    let n = 0;
+    for (let i = 0; i < w * h; i++) n += ligado[i];
+    return { rgba: saida, descricao: `chroma ${nome} — ${Math.round(100 * n / (w * h))}% virou fundo` };
+  }
+
+  const amostras = [];
+  const em = (x, y) => { const i = (y * w + x) * 4; amostras.push([p[i], p[i + 1], p[i + 2]]); };
+  em(1, 1); em(w - 2, 1); em(1, h - 2); em(w - 2, h - 2);
+  for (let x = 0; x < w; x += Math.max(1, Math.floor(w / 40))) em(x, 1);
+  const fundo = inundarDaBorda(d, amostras, 30);
+  for (let i = 0; i < w * h; i++) saida[i * 4 + 3] = fundo[i] ? 0 : 255;
+  let n = 0;
+  for (let i = 0; i < w * h; i++) n += fundo[i];
+  return { rgba: saida, descricao: `xadrez ou cor chapada, por inundação — ${Math.round(100 * n / (w * h))}%` };
+}
+
+/* ---------- 2. separar as vistas ---------- */
+
+function ilhas(solido, w, h, minimo) {
+  const rotulo = new Int32Array(w * h);
+  const fila = new Int32Array(w * h);
+  const achadas = [];
+  let atual = 0;
+  for (let s = 0; s < w * h; s++) {
+    if (!solido[s] || rotulo[s]) continue;
+    atual++;
+    let ini = 0, fim = 0;
+    fila[fim++] = s; rotulo[s] = atual;
+    let pixels = 0, minx = s % w, maxx = minx, miny = (s / w) | 0, maxy = miny;
+    while (ini < fim) {
+      const i = fila[ini++], x = i % w, y = (i / w) | 0;
+      pixels++;
+      if (x < minx) minx = x;
+      if (x > maxx) maxx = x;
+      if (y < miny) miny = y;
+      if (y > maxy) maxy = y;
+      const viz = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1,
+                   y > 0 ? i - w : -1, y < h - 1 ? i + w : -1];
+      for (let k = 0; k < 4; k++) {
+        const v = viz[k];
+        if (v >= 0 && solido[v] && !rotulo[v]) { rotulo[v] = atual; fila[fim++] = v; }
+      }
+    }
+    if (pixels >= minimo) achadas.push({ id: atual, pixels, caixa: [minx, miny, maxx + 1, maxy + 1] });
+  }
+  achadas.sort((a, b) => a.caixa[0] - b.caixa[0]);
+  return { rotulo, achadas };
+}
+
+/* ---------- 3. acabamento ---------- */
+
+// O pixel transparente ainda guarda a cor do fundo. Ela não aparece na tela, mas
+// volta como franja ao reduzir e ao comprimir. Empurrando a cor do objeto para
+// fora, o que vaza é a cor certa.
+function espalharCorParaFora(rgba, w, h, passos) {
+  const cor = new Float32Array(w * h * 3);
+  const conhecido = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    conhecido[i] = rgba[i * 4 + 3] > 0 ? 1 : 0;
+    cor[i * 3] = rgba[i * 4];
+    cor[i * 3 + 1] = rgba[i * 4 + 1];
+    cor[i * 3 + 2] = rgba[i * 4 + 2];
+  }
+  for (let k = 0; k < passos; k++) {
+    const novos = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (conhecido[i]) continue;
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      const viz = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1,
+                   y > 0 ? i - w : -1, y < h - 1 ? i + w : -1];
+      for (let j = 0; j < 4; j++) {
+        const v = viz[j];
+        if (v >= 0 && conhecido[v]) { sr += cor[v * 3]; sg += cor[v * 3 + 1]; sb += cor[v * 3 + 2]; n++; }
+      }
+      if (n) novos.push([i, sr / n, sg / n, sb / n]);
+    }
+    if (!novos.length) break;
+    for (const [i, r, g, b] of novos) {
+      cor[i * 3] = r; cor[i * 3 + 1] = g; cor[i * 3 + 2] = b; conhecido[i] = 1;
+    }
+  }
+  for (let i = 0; i < w * h; i++) {
+    rgba[i * 4] = cor[i * 3]; rgba[i * 4 + 1] = cor[i * 3 + 1]; rgba[i * 4 + 2] = cor[i * 3 + 2];
+  }
+}
+
+// Reduzir RGBA direto mistura a cor dos pixels transparentes com a dos vizinhos.
+// Multiplica pelo alfa antes, divide depois.
+function redimensionarComAlfa(dados, larguraAlvo) {
+  const w = dados.width, h = dados.height;
+  const alturaAlvo = Math.max(1, Math.round(h * larguraAlvo / w));
+  const pre = new ImageData(new Uint8ClampedArray(dados.data), w, h);
+  for (let i = 0; i < w * h; i++) {
+    const a = pre.data[i * 4 + 3] / 255;
+    pre.data[i * 4] *= a; pre.data[i * 4 + 1] *= a; pre.data[i * 4 + 2] *= a;
+  }
+  const origem = document.createElement("canvas");
+  origem.width = w; origem.height = h;
+  origem.getContext("2d").putImageData(pre, 0, 0);
+
+  const alvo = document.createElement("canvas");
+  alvo.width = larguraAlvo; alvo.height = alturaAlvo;
+  const cx = alvo.getContext("2d", { willReadFrequently: true });
+  cx.imageSmoothingEnabled = true;
+  cx.imageSmoothingQuality = "high";
+  cx.drawImage(origem, 0, 0, larguraAlvo, alturaAlvo);
+
+  const saida = cx.getImageData(0, 0, larguraAlvo, alturaAlvo);
+  for (let i = 0; i < larguraAlvo * alturaAlvo; i++) {
+    const a = Math.max(saida.data[i * 4 + 3] / 255, 1e-4);
+    saida.data[i * 4] /= a; saida.data[i * 4 + 1] /= a; saida.data[i * 4 + 2] /= a;
+  }
+  cx.putImageData(saida, 0, 0);
+  return alvo;
+}
+
+/* ---------- 4. a conferência do giro ---------- */
+
+function silhuetaNormal(rgba, w, caixa) {
+  const [x0, y0, x1, y1] = caixa;
+  const lw = x1 - x0, lh = y1 - y0;
+  const d = new ImageData(lw, lh);
+  for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+    const o = ((y + y0) * w + (x + x0)) * 4, i = (y * lw + x) * 4;
+    const v = rgba[o + 3] > 100 ? 255 : 0;
+    d.data[i] = d.data[i + 1] = d.data[i + 2] = v;
+    d.data[i + 3] = 255;
+  }
+  const c = document.createElement("canvas");
+  c.width = lw; c.height = lh;
+  c.getContext("2d").putImageData(d, 0, 0);
+
+  const p = document.createElement("canvas");
+  p.width = p.height = 120;
+  const px = p.getContext("2d", { willReadFrequently: true });
+  px.drawImage(c, 0, 0, 120, 120);
+  const s = px.getImageData(0, 0, 120, 120).data;
+  const m = new Uint8Array(120 * 120);
+  for (let i = 0; i < 120 * 120; i++) m[i] = s[i * 4] > 128 ? 1 : 0;
+  return m;
+}
+
+function iou(a, b, espelhar) {
+  let inter = 0, uniao = 0;
+  for (let y = 0; y < 120; y++) for (let x = 0; x < 120; x++) {
+    const va = a[y * 120 + x];
+    const vb = b[y * 120 + (espelhar ? 119 - x : x)];
+    if (va && vb) inter++;
+    if (va || vb) uniao++;
+  }
+  return uniao ? inter / uniao : 0;
+}
+
+/* ---------- o conversor ---------- */
+
+async function converter() {
+  if (!folhaAtual) { estado.textContent = "Escolha uma folha primeiro."; return; }
+  const idObj = ($("#id").value || "objeto").trim().replace(/\s+/g, "-");
+  const w = folhaAtual.width, h = folhaAtual.height;
+
+  estado.textContent = "Recortando o fundo…";
+  await respirar();
+
+  const { rgba, descricao } = acharFundo(folhaAtual);
+  const solido = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) solido[i] = rgba[i * 4 + 3] > 128 ? 1 : 0;
+
+  const { rotulo, achadas } = ilhas(solido, w, h, 1500);
+  if (!achadas.length) {
+    estado.textContent = "Não achei nenhum objeto — o fundo pode não ter sido reconhecido.";
+    return;
+  }
+  estado.textContent = `Separando ${achadas.length} vista(s)…`;
+  await respirar();
+
+  const ladrilhos = $("#ladrilhos").value.split("x").map(Number);
+  const larguraAlvo = LARGURA_POR_LADRILHO * ladrilhos[0];
+
+  const telas = [];
+  for (const ilha of achadas) {
+    const [x0, y0, x1, y1] = ilha.caixa;
+    const lw = x1 - x0, lh = y1 - y0;
+    const recorte = new ImageData(lw, lh);
+    const desta = (yy, xx) => yy >= 0 && yy < lh && xx >= 0 && xx < lw &&
+                              rotulo[(yy + y0) * w + (xx + x0)] === ilha.id;
+    for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+      const o = ((y + y0) * w + (x + x0)) * 4, i = (y * lw + x) * 4;
+      recorte.data[i] = rgba[o];
+      recorte.data[i + 1] = rgba[o + 1];
+      recorte.data[i + 2] = rgba[o + 2];
+      // Só o que pertence a ESTA vista. A borda macia fica fora do rótulo, então
+      // vale também o que está colado nela.
+      const pertence = desta(y, x) || desta(y - 1, x) || desta(y + 1, x) ||
+                       desta(y, x - 1) || desta(y, x + 1);
+      recorte.data[i + 3] = pertence ? rgba[o + 3] : 0;
+    }
+    espalharCorParaFora(recorte.data, lw, lh, 4);
+    telas.push(redimensionarComAlfa(recorte, larguraAlvo));
+  }
+
+  if ($("#espelhar").checked && telas.length < 4) {
+    const base = telas.length;
+    for (let k = 0; k < base && telas.length < 4; k++) {
+      const o = telas[k];
+      const c = document.createElement("canvas");
+      c.width = o.width; c.height = o.height;
+      const cx = c.getContext("2d");
+      cx.translate(o.width, 0);
+      cx.scale(-1, 1);
+      cx.drawImage(o, 0, 0);
+      telas.push(c);
+    }
+  }
+
+  const vistas = [];
+  for (let k = 0; k < telas.length; k++) {
+    const blob = await new Promise((r) => telas[k].toBlob(r, "image/webp", 0.88));
+    vistas.push({ nome: `${idObj}-${k}.webp`, blob, tela: telas[k] });
+  }
+
+  const sil = achadas.map((i) => silhuetaNormal(rgba, w, i.caixa));
+  const pares = [];
+  for (let a = 0; a < sil.length; a++) for (let b = a + 1; b < sil.length; b++)
+    pares.push({ a, b, dir: iou(sil[a], sil[b], false), esp: iou(sil[a], sil[b], true) });
+
+  resultado = { idObj, vistas, descricao, pares, achadas, folha: nomeFolha };
+  desenhar(resultado);
+  estado.textContent = `Pronto: ${vistas.length} vista(s).`;
+}
+
+/* ---------- mostrar ---------- */
+
+function desenhar(r) {
+  const tira = $("#tira");
+  const larg = r.vistas.reduce((s, v) => s + v.tela.width, 0);
+  const alt = Math.max(...r.vistas.map((v) => v.tela.height));
+  tira.width = larg; tira.height = alt;
+  const cx = tira.getContext("2d");
+  cx.clearRect(0, 0, larg, alt);
+  let x = 0;
+  for (const v of r.vistas) { cx.drawImage(v.tela, x, alt - v.tela.height); x += v.tela.width; }
+
+  const caixa = $("#vistas");
+  caixa.replaceChildren();
+  r.vistas.forEach((v, k) => {
+    const div = document.createElement("div");
+    div.className = "vista";
+    const c = document.createElement("canvas");
+    c.width = v.tela.width; c.height = v.tela.height;
+    c.getContext("2d").drawImage(v.tela, 0, 0);
+    const b = document.createElement("b");
+    b.textContent = `${k}  ${v.tela.width}×${v.tela.height}`;
+    div.append(c, b);
+    caixa.append(div);
+  });
+
+  $("#leitura").textContent =
+    `folha: ${r.folha}\nfundo: ${r.descricao}\nvistas encontradas: ${r.achadas.length}`;
+  $("#diagnostico").replaceChildren(diagnostico(r));
+  $("#baixar").hidden = false;
+}
+
+// O teste de silhueta pura dá falso positivo em objeto em forma de caixa: caixa
+// girada 90° vista de um canto tem quase a mesma silhueta sempre. Por isso o que
+// vale é o PADRÃO de espelhamento, não a semelhança média.
+function diagnostico(r) {
+  const frag = document.createDocumentFragment();
+  if (!r.pares.length) return frag;
+
+  const orientacoes = [0];
+  for (let k = 1; k < r.achadas.length; k++) {
+    const p = r.pares.find((x) => x.a === 0 && x.b === k);
+    orientacoes.push(p.dir >= p.esp ? 0 : 1);
+  }
+  const distintas = new Set(orientacoes).size;
+
+  const env = document.createElement("div");
+  env.className = "rolar";
+  const t = document.createElement("table");
+  const cab = document.createElement("thead");
+  cab.innerHTML = "<tr><th>Par</th><th>Direto</th><th>Espelhado</th><th>Leitura</th></tr>";
+  const corpo = document.createElement("tbody");
+  for (const p of r.pares) {
+    const tr = document.createElement("tr");
+    const mesma = p.dir >= p.esp;
+    const cel = (txt, n) => {
+      const td = document.createElement("td");
+      if (n) td.className = "n";
+      td.textContent = txt;
+      return td;
+    };
+    tr.append(cel(`${p.a + 1} × ${p.b + 1}`, true), cel(p.dir.toFixed(2), true),
+              cel(p.esp.toFixed(2), true), cel(mesma ? "mesma orientação" : "orientação espelhada"));
+    corpo.append(tr);
+  }
+  t.append(cab, corpo);
+  env.append(t);
+  frag.append(env);
+
+  const selo = document.createElement("p");
+  selo.style.marginTop = "12px";
+  const marca = document.createElement("span");
+  if (r.achadas.length >= 4 && distintas === 2) {
+    marca.className = "selo bom";
+    marca.textContent = "giro coerente";
+    selo.append(marca);
+    frag.append(selo);
+  } else if (r.achadas.length >= 2 && distintas === 1) {
+    marca.className = "selo ruim";
+    marca.textContent = "as vistas parecem o mesmo ângulo";
+    selo.append(marca);
+    frag.append(selo);
+    const aviso = document.createElement("div");
+    aviso.className = "aviso";
+    const b = document.createElement("b");
+    b.textContent = "Confira antes de usar.";
+    aviso.append(b, document.createTextNode(
+      "Todas as vistas estão na mesma orientação — é o sinal de que o gerador entregou " +
+      "variações do mesmo ângulo em vez de um giro. Num giro de 90° a orientação alterna. " +
+      "Regenere pedindo um turnaround, ou use uma vista só."));
+    frag.append(aviso);
+  }
+  return frag;
+}
+
+/* ---------- a ficha do objeto ---------- */
+
+// Cada objeto tem a sua propria ficha. O catalogo (manifesto.json) e a soma das
+// fichas e se remonta sozinho no GitHub -- por isso gravar um objeto novo nunca
+// mexe nos outros.
+function montarFicha(r) {
+  return JSON.stringify({
+    id: r.idObj,
+    nome: $("#nome").value || r.idObj,
+    categoria: $("#categoria").value || "Geral",
+    ladrilhos: $("#ladrilhos").value.split("x").map(Number),
+    bloqueia: !$("#livre").checked,
+    vistas: r.vistas.map((v) => `objetos/${v.nome}`),
+  }, null, 1);
+}
+
+/* ---------- zip sem compressão (o webp já vem comprimido) ---------- */
+
+const TABELA_CRC = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = TABELA_CRC[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function montarZip(itens) {
+  const partes = [], central = [];
+  let deslocamento = 0;
+  const texto = new TextEncoder();
+  for (const it of itens) {
+    const nome = texto.encode(it.caminho);
+    const crc = crc32(it.bytes), tam = it.bytes.length;
+
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true);
+    local.setUint16(8, 0, true);
+    local.setUint16(10, 0, true);
+    local.setUint16(12, 0x2821, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, tam, true);
+    local.setUint32(22, tam, true);
+    local.setUint16(26, nome.length, true);
+    local.setUint16(28, 0, true);
+    partes.push(new Uint8Array(local.buffer), nome, it.bytes);
+
+    const cen = new DataView(new ArrayBuffer(46));
+    cen.setUint32(0, 0x02014b50, true);
+    cen.setUint16(4, 20, true);
+    cen.setUint16(6, 20, true);
+    cen.setUint16(8, 0x0800, true);
+    cen.setUint16(10, 0, true);
+    cen.setUint16(12, 0, true);
+    cen.setUint16(14, 0x2821, true);
+    cen.setUint32(16, crc, true);
+    cen.setUint32(20, tam, true);
+    cen.setUint32(24, tam, true);
+    cen.setUint16(28, nome.length, true);
+    cen.setUint32(42, deslocamento, true);
+    central.push(new Uint8Array(cen.buffer), nome);
+    deslocamento += 30 + nome.length + tam;
+  }
+  const tamCentral = central.reduce((s, p) => s + p.length, 0);
+  const fim = new DataView(new ArrayBuffer(22));
+  fim.setUint32(0, 0x06054b50, true);
+  fim.setUint16(8, itens.length, true);
+  fim.setUint16(10, itens.length, true);
+  fim.setUint32(12, tamCentral, true);
+  fim.setUint32(16, deslocamento, true);
+  return new Blob([...partes, ...central, new Uint8Array(fim.buffer)], { type: "application/zip" });
+}
+
+/* ---------- entregar o arquivo ---------- */
+
+let salvar = async (nome, dados) => {
+  const blob = dados instanceof Blob ? dados : new Blob([dados]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nome;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+
+(async () => {
+  try {
+    const d = await window.claude?.use?.("downloads");
+    if (d) {
+      salvar = async (nome, dados) => { await d.save({ filename: nome, data: dados }); };
+      return;
+    }
+  } catch (e) { /* segue com o plano B */ }
+  const n = $("#nota-salvar");
+  n.textContent = "Se o download não começar, salve esta página no seu computador (⌘S) e " +
+    "abra o arquivo direto do Finder — aí os downloads funcionam sem restrição.";
+  n.hidden = false;
+})();
+
+$("#zip").addEventListener("click", async () => {
+  if (!resultado) return;
+  try {
+    const itens = [];
+    for (const v of resultado.vistas)
+      itens.push({ caminho: `objetos/${v.nome}`, bytes: new Uint8Array(await v.blob.arrayBuffer()) });
+    itens.push({ caminho: `objetos/${resultado.idObj}.json`,
+                 bytes: new TextEncoder().encode(montarFicha(resultado)) });
+    await salvar(`${resultado.idObj}.zip`, montarZip(itens));
+  } catch (e) {
+    estado.textContent = "O download não foi concluído. Tente de novo.";
+  }
+});
+
+$("#ficha").addEventListener("click", async () => {
+  if (!resultado) return;
+  try { await salvar(`${resultado.idObj}.json`, montarFicha(resultado)); }
+  catch (e) { estado.textContent = "O download não foi concluído. Tente de novo."; }
+});
+
+/* ---------- gravar direto na pasta do projeto ---------- */
+
+// O navegador escreve numa pasta do computador se o usuario autorizar. So vale em
+// contexto seguro -- e o http://localhost do TESTAR.command conta. Fora dai (a
+// pagina publicada, ou um arquivo aberto direto do Finder) a secao nem aparece.
+let pastaObjetos = null;
+
+function podeGravarNaPasta() {
+  return typeof window.showDirectoryPicker === "function" && window.isSecureContext;
+}
+
+async function lerFichasDaPasta() {
+  const fichas = [];
+  for await (const [nome, alca] of pastaObjetos.entries()) {
+    if (alca.kind !== "file" || !nome.endsWith(".json") || nome === "manifesto.json") continue;
+    try {
+      const ficha = JSON.parse(await (await alca.getFile()).text());
+      if (ficha && ficha.id === nome.slice(0, -5)) fichas.push(ficha);
+    } catch (e) { /* ficha estragada: ignora, como faz o montador do GitHub */ }
+  }
+  return fichas;
+}
+
+async function escrever(nome, dados) {
+  const alca = await pastaObjetos.getFileHandle(nome, { create: true });
+  const fluxo = await alca.createWritable();
+  await fluxo.write(dados);
+  await fluxo.close();
+}
+
+async function gravarNaPasta() {
+  if (!pastaObjetos || !resultado) return;
+  try {
+    const permissao = await pastaObjetos.requestPermission({ mode: "readwrite" });
+    if (permissao !== "granted") {
+      estado.textContent = "Permissão de escrita negada na pasta.";
+      return;
+    }
+    estado.textContent = "Gravando…";
+    for (const v of resultado.vistas) await escrever(v.nome, v.blob);
+    await escrever(`${resultado.idObj}.json`, montarFicha(resultado));
+
+    // remonta o catalogo a partir de TODAS as fichas da pasta, igual ao montador
+    // que roda no GitHub: nenhum objeto antigo se perde
+    const fichas = await lerFichasDaPasta();
+    fichas.sort((a, b) => (a.categoria + a.nome).localeCompare(b.categoria + b.nome, "pt"));
+    await escrever("manifesto.json", JSON.stringify({
+      fonte: "montado automaticamente a partir das fichas objetos/*.json — não edite à mão",
+      objetos: fichas,
+    }, null, 1));
+
+    estado.textContent =
+      `Gravado em ${pastaObjetos.name}/ — catálogo com ${fichas.length} objeto(s).`;
+  } catch (e) {
+    estado.textContent = "Não consegui gravar na pasta: " + (e?.message ?? e);
+  }
+}
+
+if (podeGravarNaPasta()) {
+  $("#pasta").hidden = false;
+  $("#escolher-pasta").addEventListener("click", async () => {
+    try {
+      pastaObjetos = await window.showDirectoryPicker({ id: "swade-objetos", mode: "readwrite" });
+      const alvo = $("#destino");
+      alvo.textContent = `gravando em ${pastaObjetos.name}/`;
+      alvo.hidden = false;
+      $("#gravar").hidden = false;
+      $("#escolher-pasta").textContent = "Trocar de pasta";
+      const fichas = await lerFichasDaPasta();
+      estado.textContent = `Pasta escolhida. ${fichas.length} objeto(s) já lá dentro.`;
+    } catch (e) {
+      if (e?.name === "AbortError") return;          // fechou o seletor, tudo bem
+      // Aberto direto do Finder o navegador diz que pode e recusa na hora de abrir
+      // o seletor. Sem esta mensagem o clique nao faria nada e pareceria defeito.
+      estado.textContent =
+        "Este navegador não deixa escolher pasta aqui. Abra o projeto pelo " +
+        "TESTAR.command, em vez de abrir o arquivo direto — aí funciona. " +
+        "Enquanto isso, o botão de baixar o .zip continua valendo.";
+    }
+  });
+  $("#gravar").addEventListener("click", gravarNaPasta);
+}
+
+/* ---------- entrada ---------- */
+
+async function receber(arquivo) {
+  if (!arquivo) return;
+  const url = URL.createObjectURL(arquivo);
+  try {
+    const img = await carregarImagem(url);
+    folhaAtual = imagemParaDados(img);
+    nomeFolha = arquivo.name;
+    const base = arquivo.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9-]+/g, "-").toLowerCase();
+    if (base) {
+      $("#id").value = base;
+      $("#nome").value = base.charAt(0).toUpperCase() + base.slice(1).replace(/-/g, " ");
+    }
+    await converter();
+  } catch (e) {
+    estado.textContent = "Não consegui abrir essa imagem.";
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+const solta = $("#solta");
+$("#arquivo").addEventListener("change", (e) => receber(e.target.files[0]));
+$("#converter").addEventListener("click", converter);
+solta.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#arquivo").click(); }
+});
+for (const ev of ["dragenter", "dragover"])
+  document.addEventListener(ev, (e) => { e.preventDefault(); solta.classList.add("sobre"); });
+document.addEventListener("dragleave", (e) => {
+  if (e.target === solta) solta.classList.remove("sobre");
+});
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  solta.classList.remove("sobre");
+  const f = e.dataTransfer?.files;
+  if (!f?.length) return;
+  for (const a of f) receber(a);
+});
+
+/* Abre com um exemplo de verdade, para a página mostrar o que faz. */
+(async () => {
+  try {
+    const img = await carregarImagem(EXEMPLO);
+    folhaAtual = imagemParaDados(img);
+    nomeFolha = "exemplo-bau.webp";
+    await converter();
+    estado.textContent = "Exemplo carregado. Arraste a sua folha para substituir.";
+  } catch (e) { /* sem exemplo, a página funciona igual */ }
+})();
+</script>

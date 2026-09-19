@@ -1,0 +1,16 @@
+{
+ "id": "bau",
+ "nome": "Baú",
+ "categoria": "Masmorra",
+ "ladrilhos": [
+  1,
+  1
+ ],
+ "bloqueia": true,
+ "vistas": [
+  "objetos/bau-0.webp",
+  "objetos/bau-1.webp",
+  "objetos/bau-2.webp",
+  "objetos/bau-3.webp"
+ ]
+}

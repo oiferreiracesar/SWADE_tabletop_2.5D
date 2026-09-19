@@ -16,13 +16,21 @@ O que ele faz, na ordem:
   3. CONFERE se as vistas sao mesmo um giro. Silhuetas quase identicas entre si
      denunciam quatro variacoes do mesmo angulo, que e o erro mais comum.
   4. Alinha o pe de todas no mesmo ponto, redimensiona e grava em webp.
-  5. Escreve (ou atualiza) a entrada em objetos/manifesto.json.
+  5. Escreve a FICHA do objeto em objetos/<id>.json e remonta o catalogo
+     objetos/manifesto.json a partir de todas as fichas.
 """
 import argparse, json, os, sys
 from collections import deque
 
 import numpy as np
 from PIL import Image
+
+# o nome do arquivo tem hifen, entao carrego pelo caminho
+import importlib.util as _iu
+_aqui = os.path.dirname(os.path.abspath(__file__))
+_spec = _iu.spec_from_file_location('montar_catalogo', os.path.join(_aqui, 'montar-catalogo.py'))
+montar_catalogo = _iu.module_from_spec(_spec)
+_spec.loader.exec_module(montar_catalogo)
 
 LARGURA_POR_LADRILHO = 160   # folga para o zoom maximo (2,5x) do tabuleiro
 
@@ -321,18 +329,15 @@ def main():
             vistas.append(f'{args.saida}/{arq}')
             print(f'  {arq}  (espelhada de {os.path.basename(vistas[k])})')
 
-    caminho_manifesto = os.path.join(destino, 'manifesto.json')
-    manifesto = {'objetos': []}
-    if os.path.exists(caminho_manifesto):
-        manifesto = json.load(open(caminho_manifesto, encoding='utf-8'))
-    manifesto['objetos'] = [o for o in manifesto.get('objetos', []) if o['id'] != args.id]
-    manifesto['objetos'].append({'id': args.id, 'nome': args.nome,
-                                 'categoria': args.categoria, 'ladrilhos': ladrilhos,
-                                 'bloqueia': bool(args.bloqueia), 'vistas': vistas})
-    manifesto['objetos'].sort(key=lambda o: (o['categoria'], o['nome']))
-    json.dump(manifesto, open(caminho_manifesto, 'w', encoding='utf-8'),
-              ensure_ascii=False, indent=1)
-    print(f'catálogo atualizado: {len(manifesto["objetos"])} objeto(s)')
+    # A FICHA do objeto, um arquivo so dele. O catalogo e a soma das fichas --
+    # por isso gravar um objeto novo nunca mexe nos outros.
+    ficha = {'id': args.id, 'nome': args.nome, 'categoria': args.categoria,
+             'ladrilhos': ladrilhos, 'bloqueia': bool(args.bloqueia), 'vistas': vistas}
+    caminho_ficha = os.path.join(destino, f'{args.id}.json')
+    json.dump(ficha, open(caminho_ficha, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    print(f'  {args.id}.json  (ficha do objeto)')
+
+    montar_catalogo.main()
 
 
 if __name__ == '__main__':
