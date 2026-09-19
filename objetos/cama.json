@@ -1,0 +1,16 @@
+{
+ "id": "cama",
+ "nome": "cama",
+ "categoria": "Quarto",
+ "ladrilhos": [
+  1,
+  2
+ ],
+ "bloqueia": true,
+ "vistas": [
+  "objetos/cama-0.webp",
+  "objetos/cama-1.webp",
+  "objetos/cama-2.webp",
+  "objetos/cama-3.webp"
+ ]
+}
