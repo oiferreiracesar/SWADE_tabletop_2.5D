@@ -1,1 +1,55 @@
+name: Montar catalogo
 
+# Toda vez que algo entra em objetos/, o manifesto.json e remontado a partir
+# das fichas objetos/*.json. Voce nunca precisa editar nem enviar o manifesto:
+# suba os .webp e a ficha do objeto, que o catalogo se monta sozinho.
+
+on:
+  push:
+    paths:
+      - 'objetos/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  montar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Montar o manifesto a partir das fichas
+        run: python3 ferramentas/montar-catalogo.py | tee saida.txt
+
+      - name: Resumo
+        run: |
+          {
+            echo '## Catálogo'
+            echo
+            echo '```'
+            cat saida.txt
+            echo '```'
+            if grep -q IGNORADO saida.txt; then
+              echo
+              echo '> Alguma ficha foi ignorada — veja as linhas `IGNORADO` acima.'
+              echo '> O objeto correspondente **não** aparece na biblioteca do tabuleiro.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gravar no repositorio
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add objetos/manifesto.json
+          if git diff --cached --quiet; then
+            echo 'O catalogo ja estava em dia.'
+            exit 0
+          fi
+          git commit -m 'Catalogo remontado a partir das fichas'
+          git push
