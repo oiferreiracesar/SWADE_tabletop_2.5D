@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engine Isométrica 2.5D - Construtor</title>
+    <style>
+        body {
+            margin: 0; padding: 0;
+            background-color: #0f172a; color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; height: 100vh; overflow: hidden;
+        }
+
+        #ui-panel {
+            width: 280px; min-width: 280px;
+            background-color: #1e293b; box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; padding: 20px;
+            box-sizing: border-box; z-index: 10; overflow-y: auto;
+        }
+
+        h2 { font-size: 1.05rem; margin: 0 0 15px 0; border-bottom: 2px solid #334155; padding-bottom: 8px; color: #94a3b8; }
+
+        .tool-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        .row-group { display: flex; gap: 8px; justify-content: space-between; }
+        .row-group button { flex-grow: 1; text-align: center; }
+
+        button {
+            background-color: #334155; color: #f8fafc; border: 1px solid #475569;
+            padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;
+            text-align: left; transition: 0.2s;
+        }
+
+        button:hover { background-color: #475569; }
+        button.active { background-color: #3b82f6; border-color: #60a5fa; color: white; font-weight: bold; }
+
+        .floor-controls {
+            display: flex; justify-content: space-between; align-items: center;
+            background-color: #0f172a; padding: 10px; border-radius: 6px; margin-bottom: 20px;
+        }
+        .floor-controls button { padding: 5px 12px; text-align: center; }
+        #floorLabel { font-size: 0.8rem; font-weight: bold; text-align: center; }
+
+        .slider-group { display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; margin-bottom: 15px; }
+        select { background-color: #334155; color: white; border: 1px solid #475569; padding: 6px; border-radius: 4px; width: 100%; }
+
+        .texture-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+        .texture-btn { height: 50px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; background-size: cover; background-position: center; transition: 0.2s; }
+        .texture-btn:hover { border-color: #94a3b8; transform: scale(1.05); }
+        .texture-btn.selected { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59, 130, 246, 0.5); }
+        .texture-label { font-size: 0.75rem; text-align: center; color: #cbd5e1; margin-top: 4px; }
+        .texture-wrapper { display: flex; flex-direction: column; }
+        .texture-categoria { grid-column: 1 / -1; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 3px; margin-top: 6px; }
+
+        .color-picker { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 8px; }
+        .color-picker input[type="color"] { cursor: pointer; border: none; border-radius: 4px; width: 30px; height: 30px; padding: 0; background: none; }
+
+        #canvas-container { flex-grow: 1; position: relative; width: calc(100vw - 280px); height: 100vh; overflow: hidden; }
+        #gameCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-panel">
+        
+        <div class="floor-controls">
+            <button id="btnFloorDown" title="Descer Andar">▼</button>
+            <span id="floorLabel">Andar Atual: Térreo (0)</span>
+            <button id="btnFloorUp" title="Subir Andar">▲</button>
+        </div>
+
+        <!-- CÂMERA -->
+        <h2>Câmera</h2>
+        <div class="tool-group row-group">
+            <button id="btnZoomOut" title="Afastar">➖ Zoom</button>
+            <button id="btnZoomIn" title="Aproximar">➕ Zoom</button>
+        </div>
+        <div class="tool-group row-group">
+            <button id="btnRotL" title="Girar 90° à esquerda (Q)">↺ Girar (Q)</button>
+            <button id="btnRotR" title="Girar 90° à direita (E)">Girar (E) ↻</button>
+        </div>
+        <div style="font-size: 0.75rem; color: #94a3b8; text-align: center; margin-bottom: 20px;">Use WASD ou Setas para mover o mapa</div>
+
+        <h2>Construção</h2>
+        <div class="tool-group">
+            <button id="btnPiso" class="active">Piso (1)</button>
+            <button id="btnParede">Parede Simples (2)</button>
+            <button id="btnRoomRect">Cômodo Retangular (3)</button>
+            <button id="btnRoomTri">Sala Triangular (4)</button>
+            <button id="btnRoomOct">Sala Octogonal (5)</button>
+            <button id="btnCerca">Cerca / Meia Parede (9)</button>
+            <button id="btnPorta">Porta / Passagem (P)</button>
+            <button id="btnColuna">Coluna de Apoio (6)</button>
+            <button id="btnAgua">Água Decorativa (0)</button>
+            <button id="btnObjeto">Objeto em Cena (O)</button>
+        </div>
+
+        <h2>Acabamento</h2>
+        <div style="font-size:0.75rem; color:#94a3b8; margin:-8px 0 10px;">
+            O Piso (1) já constrói com a textura escolhida. Aqui ficam as superfícies que não se constroem clicando.
+        </div>
+        <div class="tool-group">
+            <button id="btnPaintRoof">Pintar Telhado (7)</button>
+            <button id="btnPaintWall">Pintar Parede, Cerca e Coluna (8)</button>
+        </div>
+
+        <h2>Biblioteca de Texturas</h2>
+        <div style="font-size:0.78rem; color:#94a3b8; margin-bottom:8px;">
+            Ativa: <strong id="texturaAtiva">nenhuma</strong> — a paleta segue a ferramenta: chão no Piso (1), telha no (7), parede no (8).<br>
+            Shift pinta o cômodo inteiro · Ctrl remove a textura.
+        </div>
+        <div class="texture-grid" id="texturePalette"></div>
+
+        <h2>Ações</h2>
+        <div class="tool-group">
+            <button id="btnBorracha">Apagar (Segurar Ctrl)</button>
+            <button id="btnCutaway">Paredes: CORTADAS (C)</button>
+            <button id="btnUndo">Desfazer (Ctrl+Z)</button> <!-- O BOTÃO QUE DERRUBOU A ENGINE VOLTOU! -->
+        </div>
+
+        <h2>Geometria</h2>
+        <div class="slider-group">
+            <label for="sliderAltura">Altura das Paredes: <strong id="valorAltura">48</strong></label>
+            <input type="range" id="sliderAltura" min="12" max="96" value="48">
+        </div>
+        <div class="slider-group">
+            <label for="sliderPincelAgua">Pincel de Água: <strong id="valorPincelAgua">0,85</strong> ladrilho</label>
+            <input type="range" id="sliderPincelAgua" min="25" max="200" value="85">
+        </div>
+        <div class="slider-group">
+            <label for="roofPitchSelect">Inclinação do Telhado</label>
+            <select id="roofPitchSelect">
+                <option value="6">Baixo (Estilo Moderno)</option>
+                <option value="12">Médio (Padrão)</option>
+                <option value="24" selected>Alto (Clássico)</option>
+            </select>
+        </div>
+
+        <h2>Materiais</h2>
+        <div class="color-picker">
+            <span>Grama / Chão:</span>
+            <input type="color" id="colorSurface" value="#1e293b">
+        </div>
+        <div class="color-picker">
+            <span>Terra (Vazio):</span>
+            <input type="color" id="colorDirt" value="#1e140f">
+        </div>
+        <div class="color-picker">
+            <span>Chão Subsolo:</span>
+            <input type="color" id="colorUnderground" value="#0a0705">
+        </div>
+        <div class="color-picker">
+            <span>Telhado:</span>
+            <input type="color" id="colorRoof" value="#475569">
+        </div>
+
+
+    </div>
+
+    <!-- O CONTAINER SEGURO -->
+    <div id="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -44,7 +44,7 @@ function checa(nome, passou, detalhe = '') {
   });
 
   console.log(`\nTestando: ${RAIZ}\n${'='.repeat(64)}`);
-  await page.goto(`http://localhost:${PORTA}/index.html`, { waitUntil: 'networkidle' });
+  await page.goto(`http://localhost:${PORTA}/tabuleiro.html`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(400);
 
   // T1 — a engine carrega sem erro fatal
