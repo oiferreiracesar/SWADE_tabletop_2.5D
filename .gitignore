@@ -1,0 +1,13 @@
+# lixo do Python ao importar o montador
+__pycache__/
+*.pyc
+
+# lixo do macOS
+.DS_Store
+
+# folhas de sprite sao materia-prima: converta e apague. Se quiser guardar
+# alguma, tire a linha abaixo.
+folhas/*.png
+folhas/*.jpg
+folhas/*.jpeg
+folhas/*.webp
