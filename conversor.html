@@ -181,15 +181,22 @@
       </div>
       <p class="nota" id="nota-salvar" hidden></p>
 
-      <div class="pasta" id="pasta" hidden>
+      <div class="pasta" id="pasta">
         <p><b>Gravar direto na pasta do projeto.</b> Escolha a pasta
         <code>objetos/</code> uma vez e os arquivos passam a ser gravados lá —
-        sem baixar zip, sem descompactar. O catálogo se remonta junto.</p>
+        os <code>.webp</code>, a ficha do objeto e o <code>manifesto.json</code>
+        remontado. Sem baixar zip, sem descompactar, sem editar JSON.</p>
         <p class="destino" id="destino" hidden></p>
-        <div class="botoes">
+        <div class="botoes" id="botoes-pasta" hidden>
           <button id="escolher-pasta">Escolher a pasta objetos/</button>
           <button class="principal" id="gravar" hidden>Gravar na pasta</button>
         </div>
+        <p class="nota" id="sem-pasta" hidden>
+          <b>Aqui não dá.</b> O navegador só autoriza escrever em disco quando a
+          página vem de um servidor local. Abra o projeto pelo
+          <code>TESTAR.command</code> e entre em <b>Gerar sprites</b> pelo menu — o
+          botão aparece lá. Nesta página, use o download do <code>.zip</code> acima.
+        </p>
       </div>
     </div>
   </div>
@@ -860,7 +867,7 @@ async function gravarNaPasta() {
 }
 
 if (podeGravarNaPasta()) {
-  $("#pasta").hidden = false;
+  $("#botoes-pasta").hidden = false;
   $("#escolher-pasta").addEventListener("click", async () => {
     try {
       pastaObjetos = await window.showDirectoryPicker({ id: "swade-objetos", mode: "readwrite" });
@@ -882,6 +889,8 @@ if (podeGravarNaPasta()) {
     }
   });
   $("#gravar").addEventListener("click", gravarNaPasta);
+} else {
+  $("#sem-pasta").hidden = false;
 }
 
 /* ---------- entrada ---------- */
