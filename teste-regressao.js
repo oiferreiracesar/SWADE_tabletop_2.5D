@@ -1113,7 +1113,9 @@ function checa(nome, passou, detalhe = '') {
     mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
     definirAlturaParede(48); isCutaway = true; rotacao = 0; pinceladasDeAgua = [];
 
-    const item = catalogoObjetos[0];
+    // o catálogo começa pelos efeitos animados; este teste é sobre SPRITE
+    const item = catalogoObjetos.find(o => o.vistas && o.vistas.length);
+    if (!item) return { semSprite: true };
     document.getElementById('btnObjeto').click();
     objetoSelecionado = item.id;
 
@@ -1151,6 +1153,155 @@ function checa(nome, passou, detalhe = '') {
         `catálogo carregado=${objeto.catalogo} · posto pelo clique=${objeto.posto} · ` +
         `clique de novo gira=${objeto.girou} · sobrevive ao giro do tabuleiro=${objeto.sobreviveuAoGiro} · ` +
         `a vista desenhada muda com a câmera=${objeto.vistaMudou} · Ctrl remove=${objeto.removido}`);
+
+  // T39 — efeito animado: entra no catálogo, é desenhado, move o relógio e sai com Ctrl
+  const efeito = await page.evaluate(async () => {
+    for (let i = 0; i < 40 && catalogoObjetos.length === 0; i++) await new Promise(r => setTimeout(r, 50));
+    const cv = document.getElementById('gameCanvas'), rec = cv.getBoundingClientRect();
+    const pos = (row, col) => { const g = gridToScreen(row, col), t = worldParaTela(g.x, g.y);
+      return { x: rec.left + t.x, y: rec.top + t.y }; };
+    const ev = (t, pt, extra) => cv.dispatchEvent(new MouseEvent(t,
+      Object.assign({ clientX: pt.x, clientY: pt.y, bubbles: true }, extra || {})));
+    const clique = (pt, extra) => { ev('mousemove', pt, extra); ev('mousedown', pt, extra); ev('mouseup', pt, extra); };
+
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    definirAlturaParede(48); isCutaway = true; rotacao = 0; pinceladasDeAgua = [];
+
+    const noCatalogo = catalogoObjetos.filter(o => o.efeito).map(o => o.id);
+    const temOsTres = ['fogueira', 'braseiro', 'cristal'].every(id => noCatalogo.includes(id));
+
+    // o tabuleiro vazio não gasta quadro
+    cuidarDoRelogioDaAgua();
+    const paradoAntes = relogioDaAgua === null;
+
+    document.getElementById('btnObjeto').click();
+    objetoSelecionado = 'fogueira';
+    clique(pos(4.5, 4.5));
+    const posta = map[4][4].objeto && map[4][4].objeto.id === 'fogueira';
+
+    // com efeito na cena, o relógio corre
+    cuidarDoRelogioDaAgua();
+    const relogioCorre = relogioDaAgua !== null;
+
+    // e o desenho realmente muda entre dois instantes: é o que prova que anima
+    const tira = () => { drawIsometricGrid();
+      return document.getElementById('gameCanvas').toDataURL('image/png'); };
+    tempoDaCena = 0; const quadroA = tira();
+    tempoDaCena = 1.7; const quadroB = tira();
+    const animou = quadroA !== quadroB;
+
+    // a miniatura da biblioteca sai desenhada, não vazia
+    const mini = miniaturaDoEfeito('fogueira');
+    const temMiniatura = typeof mini === 'string' && mini.startsWith('data:image/png') && mini.length > 2000;
+
+    // sobrevive ao giro do tabuleiro
+    girarCamera(1);
+    let achou = false;
+    for (let r = 0; r < GRADE; r++) for (let c = 0; c < GRADE; c++)
+      if (map[r][c].objeto && map[r][c].objeto.id === 'fogueira') achou = true;
+
+    rotacao = 0;
+    mapData = { 0: createEmptyMap() }; map = mapData[0];
+    clique(pos(4.5, 4.5));
+    clique(pos(4.5, 4.5), { ctrlKey: true });
+    const removida = !map[4][4].objeto;
+
+    // e sem efeito nenhum o relógio para de novo
+    cuidarDoRelogioDaAgua();
+    const paradoDepois = relogioDaAgua === null;
+
+    return { temOsTres, paradoAntes, posta, relogioCorre, animou, temMiniatura,
+             sobreviveuAoGiro: achou, removida, paradoDepois };
+  });
+  const efOk = efeito.temOsTres && efeito.paradoAntes && efeito.posta && efeito.relogioCorre &&
+               efeito.animou && efeito.temMiniatura && efeito.sobreviveuAoGiro &&
+               efeito.removida && efeito.paradoDepois;
+  checa('Efeito animado: fogo entra no catálogo, anima e o relógio só corre quando precisa', efOk,
+        `os três efeitos no catálogo=${efeito.temOsTres} · tabuleiro vazio não gasta quadro=${efeito.paradoAntes} · ` +
+        `posta pelo clique=${efeito.posta} · relógio corre com efeito em cena=${efeito.relogioCorre} · ` +
+        `o desenho muda com o tempo=${efeito.animou} · miniatura na biblioteca=${efeito.temMiniatura} · ` +
+        `sobrevive ao giro=${efeito.sobreviveuAoGiro} · Ctrl remove=${efeito.removida} · ` +
+        `volta a parar sem efeito=${efeito.paradoDepois}`);
+
+  // T40 — salvar e carregar: o mapa vai para arquivo e volta inteiro
+  const persistencia = await page.evaluate(async () => {
+    mapData = { 0: createEmptyMap(), 1: createEmptyMap(), '-1': createEmptyMap() };
+    map = mapData[0]; currentFloor = 0; rotacao = 0;
+    definirAlturaParede(72);
+    pinceladasDeAgua = []; raioDoPincel = 1.2;
+
+    // um tabuleiro com um pouco de tudo
+    for (let r = 2; r < 6; r++) for (let c = 2; c < 6; c++) { map[r][c].floor = 1; map[r][c].texPiso = 'piso-x'; }
+    for (let c = 2; c < 6; c++) { map[2][c].wallR = 1; map[2][c].texR = 'tijolo'; }
+    map[3][2].aberturaL = { tipo: 'porta', estado: 'trancada' };
+    map[4][4].objeto = { id: 'bau', giro: 2 };
+    map[5][5].objeto = { id: 'fogueira', giro: 0 };
+    map[2][7].column = 1;
+    map[6][3].cercaR = 1;
+    mapData[1][3][3].floor = 1;                 // laje no andar de cima
+    mapData['-1'][4][4].floor = 1;              // camara no subsolo
+    pinceladasDeAgua.push({ r: 8.5, c: 8.5, raio: 1.1, estilo: 'lago' });
+    recalcularAgua();
+
+    const gravado = serializarMapa();
+    const texto = JSON.stringify(gravado);
+    const tamanho = texto.length;
+
+    // o arquivo guarda so o que foge do padrao
+    const celulasGravadas = Object.keys(gravado.andares['0']).length;
+    const enxuto = tamanho < 60000;
+
+    // agora destroi tudo, como se fosse outra sessao
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    pinceladasDeAgua = []; definirAlturaParede(24); rotacao = 0;
+    const zerado = !mapaTemConteudo();
+
+    // e abre de volta
+    const andares = carregarMapa(JSON.parse(texto));
+
+    const voltou =
+      andares === 3 &&
+      map[3][3].floor === 1 && map[3][3].texPiso === 'piso-x' &&
+      map[2][4].wallR === 1 && map[2][4].texR === 'tijolo' &&
+      map[3][2].aberturaL && map[3][2].aberturaL.tipo === 'porta' &&
+      map[3][2].aberturaL.estado === 'trancada' &&
+      map[4][4].objeto && map[4][4].objeto.id === 'bau' && map[4][4].objeto.giro === 2 &&
+      map[5][5].objeto && map[5][5].objeto.id === 'fogueira' &&
+      map[2][7].column === 1 && map[6][3].cercaR === 1 &&
+      mapData[1][3][3].floor === 1 && mapData['-1'][4][4].floor === 1 &&
+      pinceladasDeAgua.length === 1 && pinceladasDeAgua[0].estilo === 'lago' &&
+      blockHeight === 72 && raioDoPincel === 1.2;
+
+    // gravar de novo o que acabou de ser lido tem que dar exatamente o mesmo
+    const iguais = JSON.stringify(serializarMapa().andares) === JSON.stringify(gravado.andares);
+
+    // arquivo estranho nao pode destruir o que esta na tela
+    const ruins = [
+      null, {}, { formato: 'outra-coisa' }, { formato: 'swade-mapa', versao: 99, andares: {} },
+      { formato: 'swade-mapa', versao: 1, grade: 20, andares: { 0: {} } },
+      { formato: 'swade-mapa', versao: 1, andares: {} },
+    ];
+    let recusouTodos = true;
+    for (const r of ruins) { try { carregarMapa(r); recusouTodos = false; } catch (e) { /* esperado */ } }
+    const sobreviveu = map[3][3].floor === 1 && map[4][4].objeto && map[4][4].objeto.id === 'bau';
+
+    // célula fora do tabuleiro no arquivo é ignorada, não quebra
+    let aguentouLixo = true;
+    try {
+      carregarMapa({ formato: 'swade-mapa', versao: 1, andares: { 0: { '99,99': { floor: 1 }, '1,1': { floor: 1 } } } });
+      aguentouLixo = map[1][1].floor === 1;
+    } catch (e) { aguentouLixo = false; }
+
+    return { celulasGravadas, enxuto, zerado, voltou, iguais, recusouTodos, sobreviveu, aguentouLixo, tamanho };
+  });
+  const perOk = persistencia.enxuto && persistencia.zerado && persistencia.voltou &&
+                persistencia.iguais && persistencia.recusouTodos && persistencia.sobreviveu &&
+                persistencia.aguentouLixo;
+  checa('Salvar e carregar: o mapa vai para arquivo e volta inteiro', perOk,
+        `grava só o que foge do padrão=${persistencia.celulasGravadas} célula(s), ${Math.round(persistencia.tamanho/1024)} KB · ` +
+        `tabuleiro zerado antes de abrir=${persistencia.zerado} · tudo voltou=${persistencia.voltou} · ` +
+        `regravar dá o mesmo arquivo=${persistencia.iguais} · recusa arquivo estranho=${persistencia.recusouTodos} · ` +
+        `o mapa na tela sobrevive à recusa=${persistencia.sobreviveu} · célula fora do tabuleiro é ignorada=${persistencia.aguentouLixo}`);
 
   await browser.close();
   srv.close();

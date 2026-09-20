@@ -1007,6 +1007,378 @@ function desenharVertice(v, cor, raio) {
 // codigo fica pobre. O preco e o giro: com a camera girando, cada objeto com
 // frente e costas precisa de quatro vistas. Objeto simetrico se vira com uma.
 
+// ===================== SALVAR E CARREGAR =====================
+//
+// O mapa vivia so na memoria: fechou a aba, acabou. Agora ele vira um arquivo
+// .json que voce guarda, versiona no GitHub e abre de volta.
+//
+// Gravo so o que FOGE do padrao. Uma celula vazia nao ocupa nada no arquivo, e
+// um tabuleiro com uma casa no meio sai com alguns kilobytes em vez de
+// centenas -- e da para abrir o arquivo e entender o que tem dentro.
+
+const FORMATO_DO_MAPA = 'swade-mapa';
+const VERSAO_DO_MAPA = 1;
+
+function celulaPadrao() {
+    if (!celulaPadrao.cache) celulaPadrao.cache = createEmptyMap()[0][0];
+    return celulaPadrao.cache;
+}
+
+function serializarMapa() {
+    const padrao = celulaPadrao();
+    const andares = {};
+    for (const chave of Object.keys(mapData)) {
+        const andar = mapData[chave];
+        const celulas = {};
+        for (let r = 0; r < BORDA; r++) {
+            for (let c = 0; c < BORDA; c++) {
+                const cel = andar[r] && andar[r][c];
+                if (!cel) continue;
+                const diff = {};
+                for (const campo of Object.keys(padrao)) {
+                    const v = cel[campo];
+                    if (JSON.stringify(v) !== JSON.stringify(padrao[campo])) diff[campo] = v;
+                }
+                if (Object.keys(diff).length) celulas[`${r},${c}`] = diff;
+            }
+        }
+        andares[chave] = celulas;
+    }
+    return {
+        formato: FORMATO_DO_MAPA,
+        versao: VERSAO_DO_MAPA,
+        gravado: new Date().toISOString(),
+        grade: GRADE,
+        alturaParede: blockHeight,
+        rotacao: rotacao,
+        andarAtual: currentFloor,
+        agua: { pinceladas: pinceladasDeAgua, raio: raioDoPincel },
+        andares,
+    };
+}
+
+// Devolve o mapa montado, ou lanca com um motivo em portugues. Monto TUDO antes
+// de encostar no que esta na tela: arquivo ruim nao pode destruir o seu trabalho.
+function lerMapa(dados) {
+    if (!dados || typeof dados !== 'object') throw new Error('o arquivo não é um mapa');
+    if (dados.formato !== FORMATO_DO_MAPA) throw new Error('este arquivo não é um mapa do SWADE 2.5D');
+    if (dados.versao > VERSAO_DO_MAPA) throw new Error('mapa gravado por uma versão mais nova do tabuleiro');
+    if (!dados.andares || typeof dados.andares !== 'object') throw new Error('o mapa está sem andares');
+    if (dados.grade && dados.grade !== GRADE)
+        throw new Error(`o mapa é de um tabuleiro ${dados.grade}×${dados.grade}, e este é ${GRADE}×${GRADE}`);
+
+    const novo = {};
+    for (const chave of Object.keys(dados.andares)) {
+        const andar = createEmptyMap();
+        const celulas = dados.andares[chave] || {};
+        for (const pos of Object.keys(celulas)) {
+            const [r, c] = pos.split(',').map(Number);
+            if (!(r >= 0 && r < BORDA && c >= 0 && c < BORDA)) continue;   // fora do tabuleiro: ignora
+            Object.assign(andar[r][c], celulas[pos]);
+        }
+        novo[chave] = andar;
+    }
+    if (!Object.keys(novo).length) throw new Error('o mapa está vazio');
+    return novo;
+}
+
+function carregarMapa(dados) {
+    const novo = lerMapa(dados);                 // se lancar, nada mudou ainda
+    mapData = novo;
+    const chaves = Object.keys(mapData).map(Number).sort((a, b) => a - b);
+    currentFloor = chaves.includes(dados.andarAtual) ? dados.andarAtual : chaves[0];
+    map = mapData[currentFloor];
+    rotacao = Number(dados.rotacao) || 0;
+    pinceladasDeAgua = (dados.agua && Array.isArray(dados.agua.pinceladas)) ? dados.agua.pinceladas : [];
+    if (dados.agua && dados.agua.raio) raioDoPincel = dados.agua.raio;
+    if (dados.alturaParede) {
+        definirAlturaParede(dados.alturaParede);
+        const controle = document.getElementById('sliderAltura');
+        if (controle) controle.value = dados.alturaParede;
+    }
+    if (typeof recalcularAgua === 'function') recalcularAgua();
+    if (typeof updateUI === 'function') updateUI();
+    cuidarDoRelogioDaAgua();
+    drawIsometricGrid();
+    return Object.keys(mapData).length;
+}
+
+function mapaTemConteudo() {
+    const padrao = celulaPadrao();
+    for (const chave of Object.keys(mapData)) {
+        const andar = mapData[chave];
+        for (let r = 0; r < BORDA; r++) for (let c = 0; c < BORDA; c++) {
+            const cel = andar[r] && andar[r][c];
+            if (!cel) continue;
+            for (const campo of Object.keys(padrao))
+                if (JSON.stringify(cel[campo]) !== JSON.stringify(padrao[campo])) return true;
+        }
+    }
+    return pinceladasDeAgua.length > 0;
+}
+
+function avisarNoMapa(texto, ruim) {
+    const alvo = document.getElementById('avisoDoMapa');
+    if (!alvo) return;
+    alvo.innerText = texto;
+    alvo.style.color = ruim ? '#e08375' : '';
+}
+
+function nomeDoArquivoDeMapa() {
+    const d = new Date();
+    const dois = n => String(n).padStart(2, '0');
+    return `mapa-${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}` +
+           `-${dois(d.getHours())}${dois(d.getMinutes())}.json`;
+}
+
+function salvarMapa() {
+    const texto = JSON.stringify(serializarMapa(), null, 1);
+    const nome = nomeDoArquivoDeMapa();
+    const url = URL.createObjectURL(new Blob([texto], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    const kb = Math.max(1, Math.round(texto.length / 1024));
+    avisarNoMapa(`Gravado: ${nome} (${kb} KB)`);
+}
+
+async function abrirArquivoDeMapa(arquivo) {
+    if (!arquivo) return;
+    try {
+        const dados = JSON.parse(await arquivo.text());
+        const quantos = carregarMapa(dados);
+        avisarNoMapa(`Aberto: ${arquivo.name} — ${quantos} andar(es).`);
+    } catch (e) {
+        // o mapa que estava na tela continua intacto: lerMapa lanca antes de trocar
+        avisarNoMapa(`Não abri "${arquivo.name}": ${e.message}. O mapa na tela não foi tocado.`, true);
+    }
+}
+
+// ===================== EFEITOS ANIMADOS =====================
+//
+// Fogo, brilho e liquido nao sao arte: sao luz e movimento. Desenhar por codigo
+// sai melhor do que quadro desenhado -- o laco fecha perfeito, nao pesa arquivo
+// nenhum e a chama nunca "treme" de um quadro para o outro, que e o defeito que
+// denuncia sprite animado gerado por IA.
+//
+// Um efeito entra no catalogo como qualquer objeto, entao a ferramenta O, a
+// biblioteca, o giro e a fila de profundidade funcionam sem saber que ele e
+// diferente. So o desenho muda.
+
+// Uma chama: linguas que sobem, encolhem e balancam fora de fase entre si.
+function desenharChama(ctx, x, y, larg, alt, t, semente, quente, gordura) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // o halo: o que faz a chama iluminar em volta em vez de flutuar recortada
+    const pulso = 0.82 + 0.18 * Math.sin(t * 2.6 + semente);
+    const raioHalo = larg * 1.35 * pulso;
+    const halo = ctx.createRadialGradient(x, y - alt * 0.35, 0, x, y - alt * 0.35, raioHalo);
+    halo.addColorStop(0, 'rgba(255,170,60,0.34)');
+    halo.addColorStop(0.5, 'rgba(255,110,30,0.13)');
+    halo.addColorStop(1, 'rgba(255,90,20,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(x, y - alt * 0.35, raioHalo, 0, Math.PI * 2);
+    ctx.fill();
+
+    const gordo = gordura || 0.30;
+    const linguas = [
+        { dx: -0.26, e: 0.62, f: 2.30, c: '#d8451c' },
+        { dx:  0.24, e: 0.70, f: 1.90, c: '#ef6a1e' },
+        { dx:  0.00, e: 1.00, f: 2.70, c: '#ffab2e' },
+    ];
+    for (let k = 0; k < linguas.length; k++) {
+        const g = linguas[k];
+        const fase = t * g.f + semente + k * 1.9;
+        const h = alt * g.e * (0.74 + 0.26 * Math.abs(Math.sin(fase)));
+        const bx = x + larg * g.dx + Math.sin(fase * 0.8) * larg * 0.10;
+        const meia = larg * gordo * g.e;
+
+        ctx.fillStyle = g.c;
+        ctx.beginPath();
+        ctx.moveTo(bx - meia, y);
+        // a barriga da lingua de um lado, a ponta em cima, a barriga do outro
+        ctx.quadraticCurveTo(bx - meia * 1.15, y - h * 0.55, bx, y - h);
+        ctx.quadraticCurveTo(bx + meia * 1.15, y - h * 0.55, bx + meia, y);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // o nucleo claro, no pe da chama
+    if (quente) {
+        ctx.fillStyle = 'rgba(255,240,190,0.85)';
+        ctx.beginPath();
+        ctx.ellipse(x, y - alt * 0.13, larg * 0.16, alt * 0.17, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+// Um losango isometrico deitado, na proporcao 2:1 do tabuleiro.
+function losango(ctx, x, y, larg) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - larg / 4);
+    ctx.lineTo(x + larg / 2, y);
+    ctx.lineTo(x, y + larg / 4);
+    ctx.lineTo(x - larg / 2, y);
+    ctx.closePath();
+}
+
+const EFEITOS = [
+    {
+        id: 'fogueira', nome: 'Fogueira', categoria: 'Fogo e luz',
+        ladrilhos: [1, 1], bloqueia: true,
+        desenhar(ctx, x, y, larg, t) {
+            // a lenha primeiro, depois as pedras da frente, depois a chama: assim a
+            // chama sai de DENTRO do circulo, e nao colada por cima dele
+            ctx.strokeStyle = '#6a4d39';
+            ctx.lineWidth = larg * 0.10;
+            ctx.lineCap = 'round';
+            for (const g of [-1, 1]) {
+                ctx.beginPath();
+                ctx.moveTo(x - larg * 0.25, y + larg * 0.075 * g);
+                ctx.lineTo(x + larg * 0.25, y - larg * 0.075 * g);
+                ctx.stroke();
+            }
+            ctx.strokeStyle = '#4a3527';
+            ctx.lineWidth = larg * 0.055;
+            ctx.beginPath();
+            ctx.moveTo(x - larg * 0.05, y - larg * 0.10);
+            ctx.lineTo(x + larg * 0.18, y + larg * 0.05);
+            ctx.stroke();
+
+            const pedra = larg * 0.115;
+            const anel = (de, ate) => {
+                for (let k = de; k < ate; k++) {
+                    const a = (k / 8) * Math.PI * 2 + 0.39;
+                    const px = x + Math.cos(a) * larg * 0.42;
+                    const py = y + Math.sin(a) * larg * 0.21;
+                    ctx.fillStyle = k % 2 ? '#8d857c' : '#746c64';
+                    ctx.beginPath();
+                    ctx.ellipse(px, py, pedra, pedra * 0.66, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            };
+            anel(0, 8);
+            // chama larga e baixa: fogueira, nao vela
+            desenharChama(ctx, x, y - larg * 0.06, larg * 0.34, larg * 0.34, t, 0, true, 0.52);
+        },
+    },
+    {
+        id: 'braseiro', nome: 'Braseiro', categoria: 'Fogo e luz',
+        ladrilhos: [1, 1], bloqueia: true,
+        desenhar(ctx, x, y, larg, t) {
+            const alturaPe = larg * 0.38;
+            // tripe
+            ctx.strokeStyle = '#3f3a36';
+            ctx.lineWidth = larg * 0.045;
+            ctx.lineCap = 'round';
+            for (const dx of [-0.16, 0, 0.16]) {
+                ctx.beginPath();
+                ctx.moveTo(x + larg * dx * 0.5, y - alturaPe);
+                ctx.lineTo(x + larg * dx, y);
+                ctx.stroke();
+            }
+            // a tigela
+            ctx.fillStyle = '#55504a';
+            ctx.beginPath();
+            ctx.ellipse(x, y - alturaPe, larg * 0.24, larg * 0.11, 0, 0, Math.PI);
+            ctx.fill();
+            ctx.fillStyle = '#6d665e';
+            ctx.beginPath();
+            ctx.ellipse(x, y - alturaPe, larg * 0.24, larg * 0.10, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // as brasas, respirando
+            const brilho = 0.55 + 0.45 * Math.abs(Math.sin(t * 1.6));
+            ctx.fillStyle = `rgba(255,${Math.round(90 + 70 * brilho)},30,${0.55 + 0.35 * brilho})`;
+            ctx.beginPath();
+            ctx.ellipse(x, y - alturaPe, larg * 0.17, larg * 0.07, 0, 0, Math.PI * 2);
+            ctx.fill();
+            desenharChama(ctx, x, y - alturaPe, larg * 0.24, larg * 0.34, t, 1.3, true, 0.44);
+        },
+    },
+    {
+        id: 'cristal', nome: 'Cristal', categoria: 'Fogo e luz',
+        ladrilhos: [1, 1], bloqueia: true,
+        desenhar(ctx, x, y, larg, t) {
+            const alt = larg * 0.52;
+            const pulso = 0.6 + 0.4 * Math.sin(t * 1.15);
+
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            const halo = ctx.createRadialGradient(x, y - alt * 0.5, 0, x, y - alt * 0.5, larg * (0.5 + 0.28 * pulso));
+            halo.addColorStop(0, `rgba(120,220,255,${0.26 + 0.20 * pulso})`);
+            halo.addColorStop(1, 'rgba(90,180,255,0)');
+            ctx.fillStyle = halo;
+            ctx.beginPath();
+            ctx.arc(x, y - alt * 0.5, larg * (0.5 + 0.28 * pulso), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // base de pedra
+            ctx.fillStyle = '#4e4a52';
+            losango(ctx, x, y, larg * 0.44);
+            ctx.fill();
+
+            // o cristal: duas faces, uma clara e uma escura, como o resto do jogo
+            const meia = larg * 0.14;
+            ctx.fillStyle = `rgba(${Math.round(70 + 60 * pulso)},${Math.round(160 + 60 * pulso)},235,0.95)`;
+            ctx.beginPath();
+            ctx.moveTo(x, y - alt);
+            ctx.lineTo(x + meia, y - alt * 0.42);
+            ctx.lineTo(x, y - larg * 0.02);
+            ctx.lineTo(x - meia, y - alt * 0.42);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = `rgba(${Math.round(40 + 40 * pulso)},${Math.round(110 + 50 * pulso)},190,0.95)`;
+            ctx.beginPath();
+            ctx.moveTo(x, y - alt);
+            ctx.lineTo(x, y - larg * 0.02);
+            ctx.lineTo(x - meia, y - alt * 0.42);
+            ctx.closePath();
+            ctx.fill();
+        },
+    },
+];
+
+// A biblioteca mostra imagem de arquivo; efeito nao tem arquivo. Desenho uma vez
+// num canvas de canto e guardo o resultado.
+const miniaturas = {};
+function miniaturaDoEfeito(id) {
+    if (miniaturas[id]) return miniaturas[id];
+    const e = efeitoPorId(id);
+    if (!e) return '';
+    const lado = 96;
+    const c = document.createElement('canvas');
+    c.width = c.height = lado;
+    const cx = c.getContext('2d');
+    e.desenhar(cx, lado / 2, lado * 0.88, lado * 0.72, 0.7);
+    miniaturas[id] = c.toDataURL('image/png');
+    return miniaturas[id];
+}
+
+function efeitoPorId(id) {
+    return EFEITOS.find(e => e.id === id) || null;
+}
+
+// Existe efeito animado no andar visivel? E o que decide se o relogio corre.
+function existeEfeito() {
+    for (const chave of Object.keys(mapData)) {
+        const f = Number(chave);
+        if (!andarVisivel(f)) continue;
+        const andar = mapData[chave];
+        for (let r = 0; r < BORDA; r++) {
+            for (let c = 0; c < BORDA; c++) {
+                const o = andar[r] && andar[r][c] && andar[r][c].objeto;
+                if (o && efeitoPorId(o.id)) return true;
+            }
+        }
+    }
+    return false;
+}
+
 let catalogoObjetos = [];
 let objetoSelecionado = null;
 
@@ -1015,12 +1387,21 @@ function carregarCatalogoObjetos() {
         .then(r => r.ok ? r.json() : null)
         .then(dados => {
             if (!dados) return;
-            catalogoObjetos = dados.objetos || [];
-            if (!objetoSelecionado && catalogoObjetos.length) objetoSelecionado = catalogoObjetos[0].id;
-            montarPaletaTexturas();
-            drawIsometricGrid();
+            juntarCatalogo(dados.objetos || []);
         })
-        .catch(() => { /* sem catalogo, a ferramenta fica vazia e o resto segue */ });
+        .catch(() => juntarCatalogo([]));   // sem manifesto, ficam so os efeitos
+}
+
+// Os efeitos vem antes dos objetos desenhados: sao os que mais se usa em
+// masmorra, e assim a biblioteca abre neles.
+function juntarCatalogo(doManifesto) {
+    catalogoObjetos = EFEITOS.map(e => ({
+        id: e.id, nome: e.nome, categoria: e.categoria,
+        ladrilhos: e.ladrilhos, bloqueia: e.bloqueia, efeito: e.id,
+    })).concat(doManifesto);
+    if (!objetoSelecionado && catalogoObjetos.length) objetoSelecionado = catalogoObjetos[0].id;
+    montarPaletaTexturas();
+    drawIsometricGrid();
 }
 
 function objetoDoCatalogo(id) {
@@ -1111,6 +1492,7 @@ let raioDoPincel = 0.85;          // em ladrilhos
 const LADO_AGUA = 64;
 const telasDeAgua = {};      // uma tela por estilo, redesenhada a cada quadro
 let tempoDaAgua = 0;
+let tempoDaCena = 0;      // relogio dos efeitos animados, em segundos
 let relogioDaAgua = null;
 
 function telaDoEstilo(id) {
@@ -1213,12 +1595,14 @@ function desenharCamadaDeAgua() {
     }
 }
 
-// O relogio so corre quando ha agua na cena: um tabuleiro seco nao gasta quadro.
+// O relogio so corre quando ha agua ou efeito animado na cena: um tabuleiro
+// parado nao gasta quadro.
 function cuidarDoRelogioDaAgua() {
-    const precisa = existeAgua();
+    const precisa = existeAgua() || existeEfeito();
     if (precisa && !relogioDaAgua) {
         relogioDaAgua = setInterval(() => {
             tempoDaAgua += 0.12;
+            tempoDaCena += 0.08;
             drawIsometricGrid();
         }, 80);
     } else if (!precisa && relogioDaAgua) {
@@ -1453,19 +1837,27 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
         const obj = targetMap[row][col].objeto;
         const item = objetoDoCatalogo(obj.id);
         if (item) {
-            const img = imagemPorCaminho(vistaDoObjeto(obj, item));
-            if (img) {
-                const centro = gridToScreen(row + 0.5, col + 0.5);
-                const larguraLadrilhos = (item.ladrilhos && item.ladrilhos[0]) || 1;
-                // 0,88 do ladrilho: um bau ocupa o ladrilho sem transbordar para o vizinho
-                const largura = tileWidth * larguraLadrilhos * 0.88;
-                const altura = largura * (img.height / img.width);
-                ctx.globalAlpha = isGhost ? 0.45 : 1;
-                // o pe do objeto assenta no CENTRO do ladrilho
-                ctx.drawImage(img, centro.x - largura / 2, centro.y - altura + tileHeight * 0.28,
-                              largura, altura);
-                ctx.globalAlpha = 1;
+            const centro = gridToScreen(row + 0.5, col + 0.5);
+            const larguraLadrilhos = (item.ladrilhos && item.ladrilhos[0]) || 1;
+            // 0,88 do ladrilho: um bau ocupa o ladrilho sem transbordar para o vizinho
+            const largura = tileWidth * larguraLadrilhos * 0.88;
+            const pe = centro.y + tileHeight * 0.28;
+            const efeito = item.efeito ? efeitoPorId(item.efeito) : null;
+            ctx.globalAlpha = isGhost ? 0.45 : 1;
+            if (efeito) {
+                // o efeito desenha por conta propria, com o pe no centro do ladrilho
+                ctx.save();
+                efeito.desenhar(ctx, centro.x, pe, largura, tempoDaCena);
+                ctx.restore();
+            } else {
+                const img = imagemPorCaminho(vistaDoObjeto(obj, item));
+                if (img) {
+                    const altura = largura * (img.height / img.width);
+                    // o pe do objeto assenta no CENTRO do ladrilho
+                    ctx.drawImage(img, centro.x - largura / 2, pe - altura, largura, altura);
+                }
             }
+            ctx.globalAlpha = 1;
         }
     }
 
@@ -2231,7 +2623,7 @@ function montarPaletaTexturas() {
             caixa.className = 'texture-wrapper';
             const botao = document.createElement('div');
             botao.className = 'texture-btn' + (objetoSelecionado === item.id ? ' selected' : '');
-            botao.style.backgroundImage = `url(${item.vistas[0]})`;
+            botao.style.backgroundImage = `url(${item.efeito ? miniaturaDoEfeito(item.efeito) : item.vistas[0]})`;
             botao.style.backgroundSize = 'contain';
             botao.style.backgroundRepeat = 'no-repeat';
             botao.style.backgroundPosition = 'center';
@@ -2708,6 +3100,19 @@ window.addEventListener('keyup', (e) => {
         updatePreview();
         drawIsometricGrid();
     }
+});
+
+// ---- mapa: salvar e abrir ----
+document.getElementById('btnSalvarMapa').addEventListener('click', salvarMapa);
+document.getElementById('btnAbrirMapa').addEventListener('click', () => {
+    // so pergunta se ha algo a perder
+    if (mapaTemConteudo() &&
+        !confirm('Abrir um mapa substitui o que está na tela. O trabalho atual não foi gravado. Continuar?')) return;
+    document.getElementById('arquivoDeMapa').click();
+});
+document.getElementById('arquivoDeMapa').addEventListener('change', (e) => {
+    abrirArquivoDeMapa(e.target.files[0]);
+    e.target.value = '';          // permite abrir o MESMO arquivo de novo
 });
 
 document.getElementById('btnFloorUp').addEventListener('click', () => changeFloor(1));
