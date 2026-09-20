@@ -1179,6 +1179,11 @@ function checa(nome, passou, detalhe = '') {
     clique(pos(4.5, 4.5));
     const posta = map[4][4].objeto && map[4][4].objeto.id === 'fogueira';
 
+    // clicar de novo num EFEITO nao pode quebrar: ele nao tem lista de vistas
+    let segundoCliqueOk = true;
+    try { clique(pos(4.5, 4.5)); segundoCliqueOk = !!map[4][4].objeto; }
+    catch (e) { segundoCliqueOk = false; }
+
     // com efeito na cena, o relógio corre
     cuidarDoRelogioDaAgua();
     const relogioCorre = relogioDaAgua !== null;
@@ -1210,15 +1215,16 @@ function checa(nome, passou, detalhe = '') {
     cuidarDoRelogioDaAgua();
     const paradoDepois = relogioDaAgua === null;
 
-    return { temOsTres, paradoAntes, posta, relogioCorre, animou, temMiniatura,
+    return { temOsTres, paradoAntes, posta, segundoCliqueOk, relogioCorre, animou, temMiniatura,
              sobreviveuAoGiro: achou, removida, paradoDepois };
   });
-  const efOk = efeito.temOsTres && efeito.paradoAntes && efeito.posta && efeito.relogioCorre &&
+  const efOk = efeito.temOsTres && efeito.paradoAntes && efeito.posta && efeito.segundoCliqueOk && efeito.relogioCorre &&
                efeito.animou && efeito.temMiniatura && efeito.sobreviveuAoGiro &&
                efeito.removida && efeito.paradoDepois;
   checa('Efeito animado: fogo entra no catálogo, anima e o relógio só corre quando precisa', efOk,
         `os três efeitos no catálogo=${efeito.temOsTres} · tabuleiro vazio não gasta quadro=${efeito.paradoAntes} · ` +
-        `posta pelo clique=${efeito.posta} · relógio corre com efeito em cena=${efeito.relogioCorre} · ` +
+        `posta pelo clique=${efeito.posta} · segundo clique não quebra=${efeito.segundoCliqueOk} · ` +
+        `relógio corre com efeito em cena=${efeito.relogioCorre} · ` +
         `o desenho muda com o tempo=${efeito.animou} · miniatura na biblioteca=${efeito.temMiniatura} · ` +
         `sobrevive ao giro=${efeito.sobreviveuAoGiro} · Ctrl remove=${efeito.removida} · ` +
         `volta a parar sem efeito=${efeito.paradoDepois}`);
@@ -1302,6 +1308,112 @@ function checa(nome, passou, detalhe = '') {
         `tabuleiro zerado antes de abrir=${persistencia.zerado} · tudo voltou=${persistencia.voltou} · ` +
         `regravar dá o mesmo arquivo=${persistencia.iguais} · recusa arquivo estranho=${persistencia.recusouTodos} · ` +
         `o mapa na tela sobrevive à recusa=${persistencia.sobreviveu} · célula fora do tabuleiro é ignorada=${persistencia.aguentouLixo}`);
+
+  // T41 — fantasma: pegada verde/vermelha, filtro que bloqueia o clique e transposição ao girar
+  const espectro = await page.evaluate(async () => {
+    for (let i = 0; i < 40 && catalogoObjetos.length === 0; i++) await new Promise(r => setTimeout(r, 50));
+    mapData = { 0: createEmptyMap(), 1: createEmptyMap() };
+    map = mapData[0]; currentFloor = 0; rotacao = 0; isErasing = false;
+    pinceladasDeAgua = []; giroDoFantasma = 0;
+    currentBrush = 11;
+    const sprite = catalogoObjetos.find(o => o.vistas && o.vistas.length);
+    objetoSelecionado = sprite.id;
+
+    // 1) chão livre: verde
+    hoverRow = 4; hoverCol = 4; calcularFantasma(false);
+    const livreEhVerde = !!fantasma && fantasma.valido;
+
+    // 2) célula com água: vermelho, e o clique não entra
+    map[6][6].agua = 1;
+    hoverRow = 6; hoverCol = 6; calcularFantasma(false);
+    const aguaEhVermelho = !!fantasma && !fantasma.valido && fantasma.motivo === 'água';
+    applySmartBrush();
+    const aguaBloqueouOClique = !map[6][6].objeto;
+
+    // 3) coluna também barra
+    map[7][7].column = 1;
+    hoverRow = 7; hoverCol = 7; calcularFantasma(false);
+    const colunaBarra = !!fantasma && !fantasma.valido && fantasma.motivo === 'coluna';
+
+    // 4) objeto já posto barra
+    map[5][5].objeto = { id: sprite.id, giro: 0 };
+    objetoSelecionado = 'fogueira';
+    hoverRow = 5; hoverCol = 5; calcularFantasma(false);
+    const ocupadoBarra = !!fantasma && !fantasma.valido && fantasma.motivo === 'já tem objeto';
+
+    // 5) em cima do MESMO objeto não há fantasma: o clique ali gira
+    objetoSelecionado = sprite.id;
+    hoverRow = 5; hoverCol = 5; calcularFantasma(false);
+    const mesmoObjetoSemFantasma = fantasma === null;
+
+    // 6) no ar, no andar de cima, não pousa
+    currentFloor = 1; map = mapData[1];
+    hoverRow = 3; hoverCol = 3; calcularFantasma(false);
+    const noArBarra = !!fantasma && !fantasma.valido && fantasma.motivo === 'sem piso';
+    mapData[1][3][3].floor = 1; calcularFantasma(false);
+    const comLajeAceita = !!fantasma && fantasma.valido;
+    currentFloor = 0; map = mapData[0];
+
+    // 7) fora do tabuleiro (faixa sentinela) barra
+    hoverRow = GRADE; hoverCol = 2; calcularFantasma(false);
+    const foraBarra = !!fantasma && !fantasma.valido && fantasma.motivo === 'fora do tabuleiro';
+
+    // 8) a TRANSPOSIÇÃO: um objeto 1x3 deita e levanta conforme o giro
+    const comprido = { ladrilhos: [1, 3] };
+    const desenha = (giro, giroCam) => {
+      const antes = rotacao; rotacao = giroCam;
+      const p = footprintDoObjeto(comprido, giro, 2, 2);
+      rotacao = antes;
+      const linhas = new Set(p.map(q => q.r)).size, colunas = new Set(p.map(q => q.c)).size;
+      return `${colunas}x${linhas}`;
+    };
+    const semGiro = desenha(0, 0);      // 1 coluna, 3 linhas
+    const comGiroDoObjeto = desenha(1, 0);
+    const comGiroDaCamera = desenha(0, 1);
+    const voltaAoNormal = desenha(0, 2);
+    const transpoe = semGiro === '1x3' && comGiroDoObjeto === '3x1' &&
+                     comGiroDaCamera === '3x1' && voltaAoNormal === '1x3';
+    const cobreTres = footprintDoObjeto(comprido, 0, 2, 2).length === 3;
+
+    // 9) R gira o fantasma, e o objeto nasce com esse giro
+    giroDoFantasma = 0;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+    const rGirou = giroDoFantasma === 1;
+    hoverRow = 8; hoverCol = 2; calcularFantasma(false); applySmartBrush();
+    const nasceuGirado = map[8][2].objeto && map[8][2].objeto.giro === 1;
+
+    // 10) apagando não há fantasma
+    calcularFantasma(true);
+    const apagandoSemFantasma = fantasma === null;
+
+    // 11) o clique valida a célula do MOMENTO, não a do quadro anterior:
+    //     é o caso do arrasto, em que o mouse já andou quando o pincel roda
+    map[9][9].agua = 1;
+    hoverRow = 4; hoverCol = 7; calcularFantasma(false);   // fantasma calculado aqui
+    const fantasmaEraVerde = !!fantasma && fantasma.valido;
+    hoverRow = 9; hoverCol = 9;                            // o mouse andou para a água
+    applySmartBrush();
+    const naoConfiouNoFantasmaVelho = !map[9][9].objeto;
+
+    return { livreEhVerde, aguaEhVermelho, aguaBloqueouOClique, colunaBarra, ocupadoBarra,
+             mesmoObjetoSemFantasma, noArBarra, comLajeAceita, foraBarra,
+             transpoe, cobreTres, rGirou, nasceuGirado, apagandoSemFantasma,
+             fantasmaEraVerde, naoConfiouNoFantasmaVelho,
+             medido: { semGiro, comGiroDoObjeto, comGiroDaCamera, voltaAoNormal } };
+  });
+  const fantOk = espectro.livreEhVerde && espectro.aguaEhVermelho && espectro.aguaBloqueouOClique &&
+                 espectro.colunaBarra && espectro.ocupadoBarra && espectro.mesmoObjetoSemFantasma &&
+                 espectro.noArBarra && espectro.comLajeAceita && espectro.foraBarra &&
+                 espectro.transpoe && espectro.cobreTres && espectro.rGirou &&
+                 espectro.nasceuGirado && espectro.apagandoSemFantasma &&
+                 espectro.fantasmaEraVerde && espectro.naoConfiouNoFantasmaVelho;
+  checa('Fantasma do objeto: pegada, filtro vermelho e transposição ao girar', fantOk,
+        `chão livre fica verde=${espectro.livreEhVerde} · água/coluna/ocupado barram=${espectro.aguaEhVermelho && espectro.colunaBarra && espectro.ocupadoBarra} · ` +
+        `o clique não entra onde é vermelho=${espectro.aguaBloqueouOClique} · em cima do mesmo objeto não há fantasma=${espectro.mesmoObjetoSemFantasma} · ` +
+        `no ar barra e com laje aceita=${espectro.noArBarra && espectro.comLajeAceita} · fora do tabuleiro barra=${espectro.foraBarra} · ` +
+        `1x3 transpõe com o objeto E com a câmera=${espectro.transpoe} (${espectro.medido.semGiro}→${espectro.medido.comGiroDoObjeto}→${espectro.medido.comGiroDaCamera}) · ` +
+        `R gira e o objeto nasce girado=${espectro.rGirou && espectro.nasceuGirado} · apagando não há fantasma=${espectro.apagandoSemFantasma} · ` +
+        `o clique valida a célula do momento, não a do quadro anterior=${espectro.naoConfiouNoFantasmaVelho}`);
 
   await browser.close();
   srv.close();

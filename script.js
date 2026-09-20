@@ -1007,6 +1007,95 @@ function desenharVertice(v, cor, raio) {
 // codigo fica pobre. O preco e o giro: com a camera girando, cada objeto com
 // frente e costas precisa de quatro vistas. Objeto simetrico se vira com uma.
 
+// ===================== FANTASMA DO OBJETO =====================
+//
+// O Buy Mode do The Sims 1: antes de soltar o movel, voce ve a pegada dele no
+// chao -- verde onde cabe, vermelho onde nao. Sem isso o jogador clica no
+// escuro, que era exatamente o nosso caso.
+//
+// A pegada e calculada em ladrilhos e gira JUNTO COM O TABULEIRO. Um objeto de
+// 1x3 deitado na horizontal fica em pe quando a camera roda um quarto de volta,
+// entao largura e profundidade trocam de lugar. E a transposicao da caixa: sem
+// ela, a checagem aprova um lugar onde o movel nao cabe.
+
+let giroDoFantasma = 0;     // quartos de volta escolhidos antes de soltar (tecla R)
+let fantasma = null;        // { item, celulas, valido, giro } recalculado a cada quadro
+
+function footprintDoObjeto(item, giro, r, c) {
+    const l = (item && item.ladrilhos && item.ladrilhos[0]) || 1;
+    const p = (item && item.ladrilhos && item.ladrilhos[1]) || 1;
+    const volta = (((giro || 0) + rotacao) % 4 + 4) % 4;
+    // um quarto de volta transpoe: o que era largura vira profundidade
+    const larg = (volta % 2 === 0) ? l : p;
+    const prof = (volta % 2 === 0) ? p : l;
+    const celulas = [];
+    for (let dr = 0; dr < prof; dr++)
+        for (let dc = 0; dc < larg; dc++)
+            celulas.push({ r: r + dr, c: c + dc });
+    return celulas;
+}
+
+// Por que uma celula recusa um objeto. Devolve null quando aceita.
+function porQueNaoCabe(r, c, andar) {
+    if (!(r >= 0 && r < GRADE && c >= 0 && c < GRADE)) return 'fora do tabuleiro';
+    const m = mapData[andar];
+    if (!m || !m[r] || !m[r][c]) return 'fora do tabuleiro';
+    const cel = m[r][c];
+    if (cel.objeto) return 'já tem objeto';
+    if (cel.agua > 0) return 'água';
+    if (cel.column > 0) return 'coluna';
+    // no andar de cima nao se pousa no ar: precisa de laje embaixo
+    if (andar > 0 && !cel.floor && !cel.pisoFora) return 'sem piso';
+    return null;
+}
+
+function calcularFantasma(apagando) {
+    fantasma = null;
+    if (currentBrush !== 11 || apagando) return;
+    if (!objetoSelecionado || hoverRow < 0 || hoverCol < 0) return;
+    const item = objetoDoCatalogo(objetoSelecionado);
+    if (!item) return;
+    const cel = mapData[currentFloor] && mapData[currentFloor][hoverRow] &&
+                mapData[currentFloor][hoverRow][hoverCol];
+    // em cima do MESMO objeto o clique gira o que ja esta la: nao ha o que prever
+    if (cel && cel.objeto && cel.objeto.id === objetoSelecionado) return;
+
+    const celulas = footprintDoObjeto(item, giroDoFantasma, hoverRow, hoverCol);
+    let motivo = null;
+    for (const q of celulas) {
+        const m = porQueNaoCabe(q.r, q.c, currentFloor);
+        if (m) { motivo = m; break; }
+    }
+    fantasma = { item, celulas, valido: !motivo, motivo, giro: giroDoFantasma };
+}
+
+// A pegada e desenhada DUAS vezes: o preenchimento no chao, por baixo das
+// paredes e do proprio movel; e o contorno de novo no fim, por cima de tudo.
+// Sem a segunda passada o proprio fantasma tapa a pegada de um objeto 1x1, e
+// voce fica sem saber se pode soltar.
+function desenharPegadaDoFantasma(soContorno) {
+    if (!fantasma) return;
+    const cor = fantasma.valido ? 'rgba(52,211,153,' : 'rgba(248,113,113,';
+    ctx.save();
+    for (const q of fantasma.celulas) {
+        if (!(q.r >= 0 && q.r < BORDA && q.c >= 0 && q.c < BORDA)) continue;
+        const pN = gridToScreen(q.r, q.c), pL = gridToScreen(q.r, q.c + 1);
+        const pS = gridToScreen(q.r + 1, q.c + 1), pO = gridToScreen(q.r + 1, q.c);
+        ctx.beginPath();
+        ctx.moveTo(pN.x, pN.y); ctx.lineTo(pL.x, pL.y);
+        ctx.lineTo(pS.x, pS.y); ctx.lineTo(pO.x, pO.y);
+        ctx.closePath();
+        if (!soContorno) {
+            ctx.fillStyle = cor + '0.42)';
+            ctx.fill();
+        }
+        ctx.strokeStyle = cor + (soContorno ? '0.9)' : '1)');
+        ctx.lineWidth = soContorno ? 2.2 : 1.6;
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
 // ===================== SALVAR E CARREGAR =====================
 //
 // O mapa vivia so na memoria: fechou a aba, acabou. Agora ele vira um arquivo
@@ -1833,8 +1922,14 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
 
     // OBJETO EM CENA: desenhado depois das paredes da propria celula e antes das
     // celulas mais a frente -- a fila de profundidade ja resolve quem tampa quem.
-    if (renderPass === 0 && !naMargem && targetMap[row][col].objeto) {
-        const obj = targetMap[row][col].objeto;
+    // o fantasma entra na fila de profundidade como se ja estivesse posto: assim
+    // ele fica atras da parede da frente, e nao flutuando por cima de tudo
+    const ehOFantasma = renderPass === 0 && !naMargem && fantasma &&
+                        fIndex === currentFloor && row === hoverRow && col === hoverCol &&
+                        !targetMap[row][col].objeto;
+    if (renderPass === 0 && !naMargem && (targetMap[row][col].objeto || ehOFantasma)) {
+        const obj = ehOFantasma ? { id: fantasma.item.id, giro: fantasma.giro }
+                                : targetMap[row][col].objeto;
         const item = objetoDoCatalogo(obj.id);
         if (item) {
             const centro = gridToScreen(row + 0.5, col + 0.5);
@@ -1843,7 +1938,7 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
             const largura = tileWidth * larguraLadrilhos * 0.88;
             const pe = centro.y + tileHeight * 0.28;
             const efeito = item.efeito ? efeitoPorId(item.efeito) : null;
-            ctx.globalAlpha = isGhost ? 0.45 : 1;
+            ctx.globalAlpha = ehOFantasma ? 0.45 : (isGhost ? 0.45 : 1);
             if (efeito) {
                 // o efeito desenha por conta propria, com o pe no centro do ladrilho
                 ctx.save();
@@ -2301,11 +2396,20 @@ function drawIsometricGrid() {
     // 2) a agua: por cima do chao, por baixo de tudo que fica de pe
     desenharCamadaDeAgua();
 
+    // 2b) a pegada do objeto que voce esta segurando: no chao, por baixo das
+    // paredes -- assim um movel atras da parede nao pinta por cima dela
+    calcularFantasma(currentEraseMode);
+    desenharPegadaDoFantasma();
+
     // 3) paredes, colunas e telhados, na ordem de profundidade
     for (const cell of renderQueue) {
         renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 0);
         renderCell(cell.r, cell.c, cell.f, cell.f < currentFloor, currentEraseMode, isCutaway, cell.f === currentFloor, 1);
     }
+
+    // o contorno da pegada de novo, por cima de tudo: e o que garante que voce
+    // veja onde vai soltar mesmo com o movel tapando o chao
+    desenharPegadaDoFantasma(true);
 
     // Pontos A e B da ferramenta de parede -- e da cerca, que usa o mesmo traco.
     if (currentBrush === 2 || currentBrush === 9) {
@@ -2446,13 +2550,23 @@ function applySmartBrush() {
         const cel = map[hoverRow][hoverCol];
         if (currentEraseMode) { cel.objeto = null; return; }
         if (!objetoSelecionado) return;
+        // clicar de novo no MESMO objeto gira: vem antes da checagem de espaco,
+        // porque a celula esta ocupada por ele proprio
         if (cel.objeto && cel.objeto.id === objetoSelecionado) {
             const item = objetoDoCatalogo(cel.objeto.id);
-            const quantas = (item && item.vistas.length) || 1;
+            // efeito nao tem vistas: gira em uma posicao so, que e o certo -- fogo
+            // e cristal sao simetricos por todos os lados
+            const quantas = (item && item.vistas && item.vistas.length) || 1;
             cel.objeto.giro = ((cel.objeto.giro || 0) + 1) % quantas;
             return;
         }
-        cel.objeto = { id: objetoSelecionado, giro: 0 };
+        // Nao cabe, nao entra. Calculo aqui em vez de reaproveitar o fantasma do
+        // desenho: durante o arrasto o mouse ja mudou de celula quando isto roda,
+        // e o fantasma ainda e o do quadro anterior -- validaria a celula errada.
+        const escolhido = objetoDoCatalogo(objetoSelecionado);
+        for (const q of footprintDoObjeto(escolhido, giroDoFantasma, hoverRow, hoverCol))
+            if (porQueNaoCabe(q.r, q.c, currentFloor)) return;
+        cel.objeto = { id: objetoSelecionado, giro: giroDoFantasma };
         return;
     }
 
@@ -3054,6 +3168,15 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
+    // R gira o objeto ANTES de soltar. Depois de posto, clicar de novo gira --
+    // continua valendo, e e o gesto que voce ja conhece.
+    if ((e.key === 'r' || e.key === 'R') && currentBrush === 11) {
+        const item = objetoDoCatalogo(objetoSelecionado);
+        const quantas = (item && item.vistas && item.vistas.length) || 1;
+        giroDoFantasma = (giroDoFantasma + 1) % Math.max(quantas, 1);
+        drawIsometricGrid();
+        return;
+    }
     if (e.key === 'q' || e.key === 'Q') { girarCamera(-1); return; }
     if (e.key === 'e' || e.key === 'E') { girarCamera(1); return; }
 
