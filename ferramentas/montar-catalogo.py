@@ -14,6 +14,11 @@ import json, os, sys
 
 CAMPOS = ('id', 'nome', 'categoria', 'ladrilhos', 'bloqueia', 'vistas')
 
+# Campos que nao sao obrigatorios mas passam adiante se a ficha tiver. Sem isto,
+# remontar o catalogo APAGARIA o que alguem acrescentou a mao -- e foi por um
+# triz que nao aconteceu com o fogo em cima do braseiro.
+OPCIONAIS = ('efeitoSobreposto',)
+
 
 def montar(pasta):
     fichas, problemas = [], []
@@ -39,7 +44,11 @@ def montar(pasta):
         if sumidas:
             problemas.append(f'{arquivo}: faltam os desenhos {", ".join(sumidas)}')
             continue
-        fichas.append({c: ficha[c] for c in CAMPOS})
+        entrada = {c: ficha[c] for c in CAMPOS}
+        for c in OPCIONAIS:
+            if c in ficha:
+                entrada[c] = ficha[c]
+        fichas.append(entrada)
 
     fichas.sort(key=lambda o: (o['categoria'], o['nome']))
     return fichas, problemas

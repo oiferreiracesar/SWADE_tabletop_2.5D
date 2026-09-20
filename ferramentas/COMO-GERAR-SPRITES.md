@@ -142,3 +142,81 @@ AVISO: as vistas parecem o MESMO ÂNGULO, não um giro de 90°.
 Esse aviso é a razão de o conversor existir. O erro é invisível na folha —
 as quatro imagens parecem certas — e só aparece no tabuleiro, girando a câmera,
 depois de você já ter gerado trinta objetos do mesmo jeito.
+
+---
+
+## 7. Objeto que acende: arte no metal, fogo por código
+
+Vale para **qualquer coisa que ilumina** — vela, tocha, braseiro, fogueira,
+lareira, lanterna, caldeirão, cristal, runa. A arte cuida do metal, da cera e da
+pedra; o fogo é desenhado pelo motor, com laço perfeito e peso zero.
+
+### A regra que faz ou quebra: peça APAGADO
+
+Um gerador ao qual você pede uma tocha sempre desenha a chama. Você precisa dela
+**sem fogo**, para o nosso entrar por cima — senão fica fogo sobre fogo.
+Acrescente ao pedido, trocando a palavra do objeto:
+
+> The **torch** is **unlit and cold** — no fire, no flame, no embers, no sparks,
+> no glow, no light emission, no illuminated surroundings. Just the unlit object
+> itself.
+
+A última parte importa tanto quanto a primeira: sem `no illuminated
+surroundings`, o gerador desenha o brilho alaranjado *pintado* no metal, e aí o
+objeto parece aceso mesmo apagado.
+
+### Na ficha, basta o nome
+
+```json
+"efeitoSobreposto": "tocha"
+```
+
+Os números vêm de um modelo pronto. Se quiser ajustar, escreva só o que muda:
+
+```json
+"efeitoSobreposto": { "modelo": "tocha", "y": 0.80 }
+```
+
+### Os modelos
+
+| Modelo | O que é | Onde a chama fica |
+|---|---|---|
+| `vela` | vela, candelabro | bem no topo, chama fina e alta |
+| `tocha` | tocha de chão ou de suporte | topo, chama média |
+| `lanterna` | lampião, lanterna de mão | meia altura, chama pequena e contida |
+| `braseiro` | braseiro, tripé com tigela | na boca da tigela |
+| `caldeirao` | caldeirão, panela ao fogo | logo abaixo da boca |
+| `fogueira` | fogueira, pira | quase no chão, chama larga |
+| `lareira` | lareira, fornalha | baixa e larga |
+| `carvao` | brasas sem chama | rente ao chão, só o respiro do carvão |
+| `cristal` | cristal, gema, orbe | meia altura, luz azul pulsando |
+| `runa` | runa ou círculo no chão | rente ao chão, luz roxa |
+
+`cristal` e `runa` aceitam trocar a cor: `{ "modelo": "runa", "cor": [80,255,160] }`
+para verde.
+
+### Ajuste fino, quando precisar
+
+Todos os campos do modelo podem ser sobrescritos:
+
+- **y** — altura da chama, do **pé** do objeto para cima. `0` é o chão, `1` é o
+  topo do sprite. É o que você mais vai mexer.
+- **x** — para os lados, da linha do meio. Serve para lanterna pendurada de lado.
+- **tamanho** — largura da chama, em fração da largura do sprite.
+- **altura** — o quanto a chama é esguia; acima de `1` ela estica.
+- **gordura** — o quanto ela é bojuda na base.
+
+Olhe e mexa no `y`: se o fogo boia acima da tigela, abaixe; se afunda dentro
+dela, suba.
+
+### Duas limitações, ditas na hora certa
+
+**A âncora é uma só para as quatro vistas.** Funciona bem em objeto simétrico —
+braseiro, caldeirão, fogueira, vela — que é justamente o tipo de coisa que
+acende. Uma lareira encostada na parede, com a boca de lado, precisaria de uma
+âncora por vista; quando esse caso aparecer, dá para estender.
+
+**Tocha de parede ainda não existe.** Tocha *de chão* funciona hoje, porque
+ocupa um ladrilho. Pendurar na parede é outro mecanismo — o mesmo das aberturas,
+que moram na aresta. Está na fila.
+

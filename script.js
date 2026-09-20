@@ -1019,6 +1019,36 @@ function desenharVertice(v, cor, raio) {
 // ela, a checagem aprova um lugar onde o movel nao cabe.
 
 let giroDoFantasma = 0;     // quartos de volta escolhidos antes de soltar (tecla R)
+let escalaDoFantasma = 1;   // tamanho escolhido antes de soltar (teclas + e -)
+const ESCALA_MIN = 0.5, ESCALA_MAX = 2.5, ESCALA_PASSO = 0.25;
+
+// A escala e SO VISUAL: um bau aumentado continua bloqueando um ladrilho. O que
+// bloqueia e a pegada da ficha. Quando existirem fichas de personagem, "tamanho
+// que bloqueia" vai ser outro campo -- uma criatura Grande ocupando 2x2 e regra
+// de RPG, nao tamanho de desenho.
+function limitarEscala(v) {
+    return Math.min(ESCALA_MAX, Math.max(ESCALA_MIN, Math.round(v / ESCALA_PASSO) * ESCALA_PASSO));
+}
+
+// O objeto sob o cursor, se houver -- e quem recebe o + e o - quando existe.
+function objetoSobOCursor() {
+    if (currentBrush !== 11 || hoverRow < 0 || hoverCol < 0) return null;
+    const m = mapData[currentFloor];
+    const cel = m && m[hoverRow] && m[hoverRow][hoverCol];
+    return (cel && cel.objeto) ? cel.objeto : null;
+}
+
+// + e - mudam o tamanho: do objeto sob o cursor, ou do que voce esta segurando.
+function mudarEscala(passos) {
+    const posto = objetoSobOCursor();
+    if (posto) {
+        posto.escala = limitarEscala((posto.escala || 1) + passos * ESCALA_PASSO);
+    } else {
+        escalaDoFantasma = limitarEscala(escalaDoFantasma + passos * ESCALA_PASSO);
+    }
+    atualizarSeloDaTextura();
+    drawIsometricGrid();
+}
 let fantasma = null;        // { item, celulas, valido, giro } recalculado a cada quadro
 
 function footprintDoObjeto(item, giro, r, c) {
@@ -1066,7 +1096,8 @@ function calcularFantasma(apagando) {
         const m = porQueNaoCabe(q.r, q.c, currentFloor);
         if (m) { motivo = m; break; }
     }
-    fantasma = { item, celulas, valido: !motivo, motivo, giro: giroDoFantasma };
+    fantasma = { item, celulas, valido: !motivo, motivo, giro: giroDoFantasma,
+                 escala: escalaDoFantasma };
 }
 
 // A pegada e desenhada DUAS vezes: o preenchimento no chao, por baixo das
@@ -1315,6 +1346,87 @@ function losango(ctx, x, y, larg) {
     ctx.closePath();
 }
 
+// ---- efeitos que vao EM CIMA de um sprite desenhado ----
+//
+// A arte cuida do metal e da pedra; o codigo cuida do que e luz e movimento.
+// A ficha do objeto diz onde ancorar: x medido da linha do meio, y medido do PE
+// para cima (0 = chao, 1 = topo do sprite), e o tamanho em fracao da largura.
+const SOBREPOSTOS = {
+    chama(ctx, x, y, larg, t, cfg) {
+        desenharChama(ctx, x, y, larg, larg * (cfg.altura || 1.2), t,
+                      cfg.semente || 0, true, cfg.gordura || 0.44);
+    },
+    brasa(ctx, x, y, larg, t, cfg) {
+        const brilho = 0.55 + 0.45 * Math.abs(Math.sin(t * 1.6 + (cfg.semente || 0)));
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(x, y, 0, x, y, larg * (0.9 + 0.3 * brilho));
+        g.addColorStop(0, `rgba(255,${Math.round(120 + 60 * brilho)},40,${0.42 + 0.3 * brilho})`);
+        g.addColorStop(1, 'rgba(255,90,20,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(x, y, larg * (0.9 + 0.3 * brilho), larg * 0.42, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    },
+    brilho(ctx, x, y, larg, t, cfg) {
+        const pulso = 0.6 + 0.4 * Math.sin(t * 1.15 + (cfg.semente || 0));
+        const cor = cfg.cor || [120, 220, 255];
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(x, y, 0, x, y, larg * (1 + 0.5 * pulso));
+        g.addColorStop(0, `rgba(${cor[0]},${cor[1]},${cor[2]},${0.26 + 0.2 * pulso})`);
+        g.addColorStop(1, `rgba(${cor[0]},${cor[1]},${cor[2]},0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, larg * (1 + 0.5 * pulso), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    },
+};
+
+// Modelos prontos para o que ilumina. A ficha diz so o nome -- "modelo": "tocha"
+// -- e os numeros vem daqui. Continua dando para ajustar: qualquer campo escrito
+// na ficha vence o do modelo.
+//
+// O y e medido do PE para cima: vela e tocha tem a chama la em cima, braseiro e
+// caldeirao na altura da boca, fogueira quase no chao.
+const MODELOS_DE_LUZ = {
+    vela:      { tipo: 'chama', y: 0.88, tamanho: 0.13, altura: 1.5,  gordura: 0.34 },
+    tocha:     { tipo: 'chama', y: 0.86, tamanho: 0.22, altura: 1.35, gordura: 0.40 },
+    lanterna:  { tipo: 'chama', y: 0.62, tamanho: 0.15, altura: 1.2,  gordura: 0.38 },
+    braseiro:  { tipo: 'chama', y: 0.68, tamanho: 0.30, altura: 1.1,  gordura: 0.46 },
+    caldeirao: { tipo: 'chama', y: 0.52, tamanho: 0.30, altura: 0.9,  gordura: 0.50 },
+    fogueira:  { tipo: 'chama', y: 0.18, tamanho: 0.40, altura: 0.95, gordura: 0.52 },
+    lareira:   { tipo: 'chama', y: 0.30, tamanho: 0.34, altura: 1.0,  gordura: 0.50 },
+    carvao:    { tipo: 'brasa', y: 0.16, tamanho: 0.30 },
+    cristal:   { tipo: 'brilho', y: 0.60, tamanho: 0.34, cor: [120, 220, 255] },
+    runa:      { tipo: 'brilho', y: 0.08, tamanho: 0.40, cor: [150, 120, 255] },
+};
+
+// Resolve a ficha para os numeros finais. Aceita tres formas:
+//   "efeitoSobreposto": "tocha"
+//   "efeitoSobreposto": { "modelo": "tocha" }
+//   "efeitoSobreposto": { "modelo": "tocha", "y": 0.8 }   <- ajuste fino
+//   "efeitoSobreposto": { "tipo": "chama", "y": 0.7, ... } <- tudo a mao
+function resolverEfeitoSobreposto(cfg) {
+    if (!cfg) return null;
+    if (typeof cfg === 'string') cfg = { modelo: cfg };
+    const base = cfg.modelo ? MODELOS_DE_LUZ[cfg.modelo] : null;
+    if (cfg.modelo && !base) return null;          // modelo que nao existe: ignora
+    return Object.assign({}, base || {}, cfg);
+}
+
+// Desenha o efeito da ficha por cima do sprite ja desenhado.
+function desenharSobreposto(bruto, centroX, pe, largura, altura, t) {
+    const cfg = resolverEfeitoSobreposto(bruto);
+    const f = cfg && SOBREPOSTOS[cfg.tipo];
+    if (!f) return;
+    const x = centroX + largura * (cfg.x || 0);
+    const y = pe - altura * (typeof cfg.y === 'number' ? cfg.y : 0.6);
+    f(ctx, x, y, largura * (cfg.tamanho || 0.3), t, cfg);
+}
+
 const EFEITOS = [
     {
         id: 'fogueira', nome: 'Fogueira', categoria: 'Fogo e luz',
@@ -1461,7 +1573,10 @@ function existeEfeito() {
         for (let r = 0; r < BORDA; r++) {
             for (let c = 0; c < BORDA; c++) {
                 const o = andar[r] && andar[r][c] && andar[r][c].objeto;
-                if (o && efeitoPorId(o.id)) return true;
+                if (!o) continue;
+                if (efeitoPorId(o.id)) return true;
+                const item = objetoDoCatalogo(o.id);
+                if (item && item.efeitoSobreposto) return true;   // sprite com fogo em cima
             }
         }
     }
@@ -1928,14 +2043,14 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                         fIndex === currentFloor && row === hoverRow && col === hoverCol &&
                         !targetMap[row][col].objeto;
     if (renderPass === 0 && !naMargem && (targetMap[row][col].objeto || ehOFantasma)) {
-        const obj = ehOFantasma ? { id: fantasma.item.id, giro: fantasma.giro }
+        const obj = ehOFantasma ? { id: fantasma.item.id, giro: fantasma.giro, escala: fantasma.escala }
                                 : targetMap[row][col].objeto;
         const item = objetoDoCatalogo(obj.id);
         if (item) {
             const centro = gridToScreen(row + 0.5, col + 0.5);
             const larguraLadrilhos = (item.ladrilhos && item.ladrilhos[0]) || 1;
             // 0,88 do ladrilho: um bau ocupa o ladrilho sem transbordar para o vizinho
-            const largura = tileWidth * larguraLadrilhos * 0.88;
+            const largura = tileWidth * larguraLadrilhos * 0.88 * (obj.escala || 1);
             const pe = centro.y + tileHeight * 0.28;
             const efeito = item.efeito ? efeitoPorId(item.efeito) : null;
             ctx.globalAlpha = ehOFantasma ? 0.45 : (isGhost ? 0.45 : 1);
@@ -1950,6 +2065,9 @@ function renderCell(row, col, fIndex, isGhost, activeEraseMode = false, applyCut
                     const altura = largura * (img.height / img.width);
                     // o pe do objeto assenta no CENTRO do ladrilho
                     ctx.drawImage(img, centro.x - largura / 2, pe - altura, largura, altura);
+                    // e o que e luz vai por cima, desenhado por codigo
+                    if (item.efeitoSobreposto)
+                        desenharSobreposto(item.efeitoSobreposto, centro.x, pe, largura, altura, tempoDaCena);
                 }
             }
             ctx.globalAlpha = 1;
@@ -2566,7 +2684,7 @@ function applySmartBrush() {
         const escolhido = objetoDoCatalogo(objetoSelecionado);
         for (const q of footprintDoObjeto(escolhido, giroDoFantasma, hoverRow, hoverCol))
             if (porQueNaoCabe(q.r, q.c, currentFloor)) return;
-        cel.objeto = { id: objetoSelecionado, giro: giroDoFantasma };
+        cel.objeto = { id: objetoSelecionado, giro: giroDoFantasma, escala: escalaDoFantasma };
         return;
     }
 
@@ -2835,7 +2953,11 @@ function atualizarSeloDaTextura() {
     const grupo = grupoDaFerramenta();
     if (grupo === 'objeto') {
         const item = objetoDoCatalogo(objetoSelecionado);
-        selo.innerText = item ? item.nome : 'nenhum';
+        if (!item) { selo.innerText = 'nenhum'; return; }
+        const posto = objetoSobOCursor();
+        const escala = posto ? (posto.escala || 1) : escalaDoFantasma;
+        const quanto = Math.round(escala * 100);
+        selo.innerText = quanto === 100 ? item.nome : `${item.nome} — ${quanto}%`;
         return;
     }
     if (grupo === 'abertura') {
@@ -3166,6 +3288,15 @@ window.addEventListener('keydown', (e) => {
         currentBrush = 10;
         updateUI(); montarPaletaTexturas(); updatePreview(); drawIsometricGrid();
         return;
+    }
+
+    // + e - mudam o tamanho. Aceito as tres grafias que o teclado manda: a tecla
+    // de cima, a do teclado numerico e o '=' que divide espaco com o '+'.
+    if (currentBrush === 11 && (e.key === '+' || e.key === '=' || e.key === 'Add')) {
+        mudarEscala(1); return;
+    }
+    if (currentBrush === 11 && (e.key === '-' || e.key === '_' || e.key === 'Subtract')) {
+        mudarEscala(-1); return;
     }
 
     // R gira o objeto ANTES de soltar. Depois de posto, clicar de novo gira --

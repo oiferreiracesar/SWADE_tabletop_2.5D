@@ -1415,6 +1415,149 @@ function checa(nome, passou, detalhe = '') {
         `R gira e o objeto nasce girado=${espectro.rGirou && espectro.nasceuGirado} · apagando não há fantasma=${espectro.apagandoSemFantasma} · ` +
         `o clique valida a célula do momento, não a do quadro anterior=${espectro.naoConfiouNoFantasmaVelho}`);
 
+  // T42 — tamanho do objeto: + e - mudam a escala, e ela é só visual
+  const tamanho = await page.evaluate(async () => {
+    for (let i = 0; i < 40 && catalogoObjetos.length === 0; i++) await new Promise(r => setTimeout(r, 50));
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    rotacao = 0; isErasing = false; pinceladasDeAgua = [];
+    currentBrush = 11; giroDoFantasma = 0; escalaDoFantasma = 1;
+    const sprite = catalogoObjetos.find(o => o.vistas && o.vistas.length);
+    objetoSelecionado = sprite.id;
+    const tecla = k => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+    // sobre chão livre, + e - mexem no que você está segurando
+    hoverRow = 3; hoverCol = 3;
+    tecla('+'); tecla('+');
+    const subiu = escalaDoFantasma === 1.5;
+    tecla('-');
+    const desceu = escalaDoFantasma === 1.25;
+
+    // os limites seguram
+    for (let i = 0; i < 20; i++) tecla('+');
+    const teto = escalaDoFantasma === 2.5;
+    for (let i = 0; i < 40; i++) tecla('-');
+    const piso = escalaDoFantasma === 0.5;
+
+    // o objeto nasce com o tamanho escolhido
+    escalaDoFantasma = 1.75;
+    calcularFantasma(false); applySmartBrush();
+    const nasceuGrande = map[3][3].objeto && map[3][3].objeto.escala === 1.75;
+
+    // com o cursor EM CIMA de um objeto posto, + mexe nele e não no fantasma
+    const antesDoFantasma = escalaDoFantasma;
+    tecla('+');
+    const mexeuNoPosto = map[3][3].objeto.escala === 2 && escalaDoFantasma === antesDoFantasma;
+
+    // a escala NÃO muda a pegada: continua um ladrilho
+    const pegada = footprintDoObjeto(sprite, 0, 3, 3).length;
+    const pegadaIntacta = pegada === 1;
+
+    // e não desbloqueia nada: a célula ao lado segue livre
+    hoverRow = 3; hoverCol = 4; calcularFantasma(false);
+    const vizinhaLivre = !!fantasma && fantasma.valido;
+
+    // sobrevive ao salvar e abrir
+    const gravado = JSON.parse(JSON.stringify(serializarMapa()));
+    mapData = { 0: createEmptyMap() }; map = mapData[0];
+    carregarMapa(gravado);
+    const sobreviveu = map[3][3].objeto && map[3][3].objeto.escala === 2;
+
+    // o '=' também sobe, porque divide a tecla com o '+'
+    escalaDoFantasma = 1; hoverRow = 7; hoverCol = 7;
+    tecla('=');
+    const igualTambemSobe = escalaDoFantasma === 1.25;
+
+    return { subiu, desceu, teto, piso, nasceuGrande, mexeuNoPosto, pegadaIntacta,
+             vizinhaLivre, sobreviveu, igualTambemSobe };
+  });
+  const tamOk = tamanho.subiu && tamanho.desceu && tamanho.teto && tamanho.piso &&
+                tamanho.nasceuGrande && tamanho.mexeuNoPosto && tamanho.pegadaIntacta &&
+                tamanho.vizinhaLivre && tamanho.sobreviveu && tamanho.igualTambemSobe;
+  checa('Tamanho do objeto: + e − mudam a escala, e ela é só visual', tamOk,
+        `+ e − mudam de 25 em 25=${tamanho.subiu && tamanho.desceu} · limites 50% e 250% seguram=${tamanho.teto && tamanho.piso} · ` +
+        `nasce com o tamanho escolhido=${tamanho.nasceuGrande} · sobre um objeto posto mexe NELE=${tamanho.mexeuNoPosto} · ` +
+        `a pegada continua um ladrilho=${tamanho.pegadaIntacta} · a célula vizinha segue livre=${tamanho.vizinhaLivre} · ` +
+        `sobrevive ao salvar e abrir=${tamanho.sobreviveu} · a tecla '=' também sobe=${tamanho.igualTambemSobe}`);
+
+  // T43 — efeito em cima de sprite: arte no metal, fogo por código
+  const sobreposto = await page.evaluate(async () => {
+    for (let i = 0; i < 40 && catalogoObjetos.length === 0; i++) await new Promise(r => setTimeout(r, 50));
+    mapData = { 0: createEmptyMap() }; map = mapData[0]; currentFloor = 0;
+    rotacao = 0; pinceladasDeAgua = []; currentBrush = 1; hoverRow = -1; hoverCol = -1;
+
+    const sprite = catalogoObjetos.find(o => o.vistas && o.vistas.length);
+    const limpo = !sprite.efeitoSobreposto;          // nenhum objeto real carrega isto hoje
+
+    // o relógio fica parado com o sprite puro em cena
+    map[4][4].objeto = { id: sprite.id, giro: 0 };
+    cuidarDoRelogioDaAgua();
+    const paradoSemEfeito = relogioDaAgua === null;
+
+    // agora o mesmo sprite ganha fogo pela ficha
+    sprite.efeitoSobreposto = { tipo: 'chama', x: 0, y: 0.72, tamanho: 0.26 };
+    cuidarDoRelogioDaAgua();
+    const relogioAcordou = relogioDaAgua !== null;
+
+    // e o desenho passa a mudar com o tempo
+    const tira = () => { drawIsometricGrid();
+      return document.getElementById('gameCanvas').toDataURL('image/png'); };
+    tempoDaCena = 0; const a = tira();
+    tempoDaCena = 1.9; const b = tira();
+    const animou = a !== b;
+
+    // os três tipos existem e nenhum lança
+    let todosDesenham = true;
+    for (const tipo of ['chama', 'brasa', 'brilho']) {
+      try { desenharSobreposto({ tipo, x: 0, y: 0.5, tamanho: 0.3 }, 100, 200, 60, 80, 1.2); }
+      catch (e) { todosDesenham = false; }
+    }
+    // tipo desconhecido não pode quebrar o desenho do tabuleiro
+    let tipoEstranhoEhIgnorado = true;
+    try { desenharSobreposto({ tipo: 'nao-existe' }, 100, 200, 60, 80, 1.2); }
+    catch (e) { tipoEstranhoEhIgnorado = false; }
+
+    // os modelos prontos: nome na ficha basta, e o ajuste fino vence o modelo
+    const todosOsModelos = Object.keys(MODELOS_DE_LUZ);
+    const temOsEsperados = ['vela','tocha','braseiro','fogueira','lareira','caldeirao','cristal']
+      .every(m => todosOsModelos.includes(m));
+    const porNome = resolverEfeitoSobreposto('tocha');
+    const nomeFunciona = !!porNome && porNome.tipo === 'chama' && porNome.y === MODELOS_DE_LUZ.tocha.y;
+    const porObjeto = resolverEfeitoSobreposto({ modelo: 'tocha' });
+    const objetoFunciona = !!porObjeto && porObjeto.y === MODELOS_DE_LUZ.tocha.y;
+    const ajustado = resolverEfeitoSobreposto({ modelo: 'tocha', y: 0.5 });
+    const ajusteVence = ajustado.y === 0.5 && ajustado.tamanho === MODELOS_DE_LUZ.tocha.tamanho;
+    const modeloInventado = resolverEfeitoSobreposto({ modelo: 'nao-existe' }) === null;
+    // e todo modelo aponta para um tipo que existe de verdade
+    const modelosCoerentes = todosOsModelos.every(m => !!SOBREPOSTOS[MODELOS_DE_LUZ[m].tipo]);
+
+    // a âncora responde: y mais alto sobe o fogo na tela
+    const semAncora = (() => { sprite.efeitoSobreposto.y = 0.1; return tira(); })();
+    const comAncora = (() => { sprite.efeitoSobreposto.y = 0.9; return tira(); })();
+    const ancoraMuda = semAncora !== comAncora;
+
+    delete sprite.efeitoSobreposto;
+    cuidarDoRelogioDaAgua();
+    const voltouAParar = relogioDaAgua === null;
+
+    return { limpo, paradoSemEfeito, relogioAcordou, animou, todosDesenham,
+             tipoEstranhoEhIgnorado, ancoraMuda, voltouAParar,
+             temOsEsperados, nomeFunciona, objetoFunciona, ajusteVence,
+             modeloInventado, modelosCoerentes, quantosModelos: todosOsModelos.length };
+  });
+  const sobOk = sobreposto.limpo && sobreposto.paradoSemEfeito && sobreposto.relogioAcordou &&
+                sobreposto.animou && sobreposto.todosDesenham && sobreposto.tipoEstranhoEhIgnorado &&
+                sobreposto.ancoraMuda && sobreposto.voltouAParar &&
+                sobreposto.temOsEsperados && sobreposto.nomeFunciona && sobreposto.objetoFunciona &&
+                sobreposto.ajusteVence && sobreposto.modeloInventado && sobreposto.modelosCoerentes;
+  checa('Efeito em cima de sprite: a ficha acende o fogo sobre a arte', sobOk,
+        `sprite puro não acorda o relógio=${sobreposto.paradoSemEfeito} · a ficha com efeito acorda=${sobreposto.relogioAcordou} · ` +
+        `o desenho muda com o tempo=${sobreposto.animou} · chama, brasa e brilho desenham=${sobreposto.todosDesenham} · ` +
+        `tipo desconhecido é ignorado sem quebrar=${sobreposto.tipoEstranhoEhIgnorado} · a âncora y move o fogo=${sobreposto.ancoraMuda} · ` +
+        `tirando a ficha o relógio para=${sobreposto.voltouAParar} · ` +
+        `${sobreposto.quantosModelos} modelos prontos, todos coerentes=${sobreposto.modelosCoerentes} · ` +
+        `o nome sozinho basta=${sobreposto.nomeFunciona && sobreposto.objetoFunciona} · ` +
+        `o ajuste fino vence o modelo=${sobreposto.ajusteVence} · modelo inventado é ignorado=${sobreposto.modeloInventado}`);
+
   await browser.close();
   srv.close();
 
